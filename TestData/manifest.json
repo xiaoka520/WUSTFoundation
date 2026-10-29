@@ -1,0 +1,116 @@
+{
+  "capturedOn": "2026-10-24",
+  "timezone": "Asia/Shanghai",
+  "browser": "Safari",
+  "realStudentCardCaptured": true,
+  "realXjkpTableFound": true,
+  "fixtures": [
+    {
+      "path": "../../webPageData/学籍卡片.html",
+      "kind": "captured-raw-full-page-source",
+      "source": "https://bkjx.wust.edu.cn/jsxsd/grxx/xsxx",
+      "browser": "Safari",
+      "capturedOn": "2026-10-24",
+      "selector": "table#xjkpTable",
+      "transformations": [],
+      "bytes": 22425,
+      "sha256": "ab416a668fef7c23595f84f1b0f2310e578221eecf0209957edb87cac4cdf6c3",
+      "byteIdenticalToSafariSavedSource": true,
+      "rowCount": 54,
+      "studentIDCell": {
+        "row": 3,
+        "td": 5
+      },
+      "sourceContainsExplicitTbody": false,
+      "hometownIsEmpty": true,
+      "containsRealPersonalData": true,
+      "verification": {
+        "method": "execute byte-identical current StudentInfoParser.swift with SwiftSoup 2.14.3 in a temporary package",
+        "studentIDMatchesLivePage": true,
+        "selectorMatchesThirdRowFifthTd": true,
+        "result": "passed"
+      }
+    },
+    {
+      "path": "captured/portal-student-info.html",
+      "kind": "captured-sanitized-fragment",
+      "source": "https://portal.wust.edu.cn/#/index46",
+      "selector": ".userInfo_JSGRXX",
+      "currentParserError": "tableNotFound",
+      "testStudentID": "209900000001",
+      "testName": "测试学生",
+      "transformations": [
+        "replace name and student ID",
+        "remove images and link destinations",
+        "reformat whitespace",
+        "add offline HTML wrapper"
+      ]
+    },
+    {
+      "path": "captured/portal-grades-placeholder.html",
+      "kind": "captured-fragment",
+      "source": "https://portal.wust.edu.cn/#/index73",
+      "selector": "table",
+      "currentParserError": "tableNotFound",
+      "tableChecks": [
+        {
+          "index": 0,
+          "length": 2816,
+          "hash31": 3401112067
+        },
+        {
+          "index": 1,
+          "length": 637,
+          "hash31": 2700819120
+        }
+      ],
+      "transformations": [
+        "add offline HTML wrapper"
+      ],
+      "observation": "One all-zero row in the main table; one duplicate fixed-column table. Backend meaning unconfirmed."
+    },
+    {
+      "path": "captured/portal-source-shell.html",
+      "kind": "captured-source-fragment",
+      "source": "https://portal.wust.edu.cn/#/index73",
+      "selector": "div#root",
+      "currentParserError": "tableNotFound",
+      "transformations": [
+        "extract empty root from Safari saved page source",
+        "add offline HTML wrapper"
+      ]
+    },
+    {
+      "path": "synthetic/student-id-normal.html",
+      "kind": "synthetic",
+      "currentParserValue": "209900000001"
+    },
+    {
+      "path": "synthetic/student-id-whitespace.html",
+      "kind": "synthetic",
+      "currentParserValue": "209900000001"
+    },
+    {
+      "path": "synthetic/student-id-empty.html",
+      "kind": "synthetic",
+      "currentParserError": "studentIDNotFound"
+    },
+    {
+      "path": "synthetic/student-id-cell-missing.html",
+      "kind": "synthetic",
+      "currentParserError": "studentIDNotFound"
+    },
+    {
+      "path": "synthetic/student-id-label-mismatch.html",
+      "kind": "synthetic-known-bug",
+      "currentParserValue": "姓名：测试学生",
+      "desiredBehavior": "Reject a non-student-ID field instead of returning its text."
+    }
+  ],
+  "resolvedHistoricalBlocker": {
+    "url": "https://bkjx.wust.edu.cn/jsxsd/sso.jsp",
+    "message": "Safari浏览器无法与服务器建立安全连接",
+    "attempts": 2,
+    "resolvedOn": "2026-10-24"
+  }
+}
