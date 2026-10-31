@@ -42,7 +42,7 @@ struct UnionPasswordEncoder {
             kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
             kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
         ]
-        
+
         guard let publicKey = SecKeyCreateWithData(
             keyData as CFData,
             attributes as CFDictionary,
@@ -50,10 +50,10 @@ struct UnionPasswordEncoder {
         ) else {
             throw UnionPasswordEncoderError.publicKeyImportFailed
         }
-        
+
         return publicKey
     }
-    
+
     func encode(password: String) throws -> String {
         let publicKey = try makePublicKey()
         let plainData = passwordData(from: password)
@@ -61,19 +61,19 @@ struct UnionPasswordEncoder {
         guard SecKeyIsAlgorithmSupported(publicKey, .encrypt, algorithm) else {
             throw UnionPasswordEncoderError.unsupportedAlgorithm
         }
-        
+
         let blockSize = SecKeyGetBlockSize(publicKey)
-        
+
         guard plainData.count <= blockSize else {
             throw UnionPasswordEncoderError.passwordTooLong
         }
-        
+
         var paddedData = Data(
             repeating: 0,
             count: (blockSize-plainData.count)
         )
         paddedData.append(plainData)
-        
+
         guard let encryptedData = SecKeyCreateEncryptedData(
             publicKey,
             algorithm,
@@ -82,7 +82,7 @@ struct UnionPasswordEncoder {
         ) else {
             throw UnionPasswordEncoderError.encryptionFailed
         }
-        
+
         return hexString(from: encryptedData as Data)
     }
 }

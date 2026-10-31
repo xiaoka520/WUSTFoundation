@@ -11,8 +11,3 @@ struct UnionLoginConfigurationResponse: Decodable {
     let meta: UnionResponseMeta
     let data: UnionLoginConfiguration?
 }
-
-struct UnionResponseMeta: Decodable {
-    let success: Bool
-    let statusCode: Int
-}
