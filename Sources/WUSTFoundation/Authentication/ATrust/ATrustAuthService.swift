@@ -9,23 +9,21 @@ public enum ATrustAuthServiceError: Error {
     case casLoginNotFound
     case invalidRedirect
     case serviceNotFound
+    case requestFailed(operation: String, statusCode: Int, businessCode: Int?)
+    case invalidEnvironmentTicket
+    case invalidDeviceID
 }
 
 public struct ATrustAuthService {
     public init() {}
     public func fetchCASLoginURL(using session: URLSession) async throws -> URL{
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "atrust.wust.edu.cn"
-        components.path = "/passport/v1/public/authConfig"
-        components.queryItems = [
-            URLQueryItem(name: "needTicket", value: "1"),
-            URLQueryItem(name: "mod", value: "1")
-        ]
-        
-        guard let configURL = components.url else {
-            throw ATrustAuthServiceError.invalidURL
-        }
+        let configURL = try makeRequestURL(
+            path: "/passport/v1/public/authConfig",
+            queryItems: [
+                URLQueryItem(name: "needTicket", value: "1"),
+                URLQueryItem(name: "mod", value: "1")
+            ]
+        )
         var request = URLRequest(url: configURL)
         request.httpMethod = "GET"
         
@@ -111,7 +109,7 @@ public struct ATrustAuthService {
         throw ATrustAuthServiceError.serviceNotFound
     }
     
-    private func exchangeCASTicket(
+    public func exchangeCASTicket(
         ticket: String,
         service: String,
         using session: URLSession
@@ -165,5 +163,140 @@ public struct ATrustAuthService {
             using: session
         )
         
+    }
+
+    private func fetchCSRFToken(
+        using session: URLSession
+    ) async throws -> String {
+        let url = try makeRequestURL(
+            path: "/passport/v1/public/authConfig",
+            queryItems: [URLQueryItem(name: "mod", value: "1")]
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        _ = try validateResponse(response, data: data, operation: "获取 CSRF Token")
+        let result = try JSONDecoder().decode(
+            ATrustConfigurationResponse.self,
+            from: data
+        )
+        guard result.code == 0 else {
+            throw ATrustAuthServiceError.rejected(result.code)
+        }
+        guard let csrfToken = result.data?.security?.csrfToken,
+              !csrfToken.isEmpty else {
+            throw ATrustAuthServiceError.invalidConfiguration
+        }
+
+        return csrfToken
+    }
+
+    public func checkAuthentication(
+        using session: URLSession
+    ) async throws -> (Data, HTTPURLResponse) {
+        let csrfToken = try await fetchCSRFToken(using: session)
+        let url = try makeRequestURL(path: "/passport/v1/auth/authCheck")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        let traceID = String(UUID().uuidString.prefix(8)).lowercased()
+
+        request.setValue(csrfToken, forHTTPHeaderField: "x-csrf-token")
+        request.setValue(traceID, forHTTPHeaderField: "x-sdp-traceid")
+        let (data, response) = try await session.data(for: request)
+        let httpResponse = try validateResponse(response, data: data, operation: "authCheck")
+        return (data, httpResponse)
+    }
+
+    private func makeRequestURL(
+        path: String,
+        queryItems: [URLQueryItem] = []
+    ) throws -> URL {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        let platform = "Mac"
+        #elseif os(iOS)
+        let platform = "iOS"
+        #else
+        let platform = "Unknown"
+        #endif
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "atrust.wust.edu.cn"
+        components.path = path
+        components.queryItems = queryItems + [
+            URLQueryItem(name: "clientType", value: "SDPBrowserClient"),
+            URLQueryItem(name: "platform", value: platform),
+            URLQueryItem(name: "lang", value: "zh-CN")
+        ]
+        guard let url = components.url else {
+            throw ATrustAuthServiceError.invalidURL
+        }
+        return url
+    }
+
+    private func validateResponse(
+        _ response: URLResponse,
+        data: Data,
+        operation: String
+    ) throws -> HTTPURLResponse {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ATrustAuthServiceError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw ATrustAuthServiceError.requestFailed(
+                operation: operation,
+                statusCode: httpResponse.statusCode,
+                businessCode: object?["code"] as? Int
+            )
+        }
+        return httpResponse
+    }
+
+    
+    public func reportEnvironment(
+        environmentTicket: String,
+        deviceID: String,
+        using session: URLSession
+    ) async throws {
+        guard !environmentTicket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ATrustAuthServiceError.invalidEnvironmentTicket
+        }
+        guard !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ATrustAuthServiceError.invalidDeviceID
+        }
+        let csrfToken = try await fetchCSRFToken(using: session)
+        let url = try makeRequestURL(
+            path: "/controller/v1/public/reportEnv"
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(csrfToken, forHTTPHeaderField: "x-csrf-token")
+        let traceID = String(UUID().uuidString.prefix(8)).lowercased()
+        request.setValue(traceID, forHTTPHeaderField: "x-sdp-traceid")
+
+        let payload: [String: Any] = [
+            "ticket": environmentTicket,
+            "deviceId": deviceID,
+            "env": [
+                "endpoint": [
+                    "device_id": deviceID,
+                    "device": ["type": "browser"]
+                ]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await session.data(for: request)
+        _ = try validateResponse(response, data: data, operation: "环境上报")
+        let result = try JSONDecoder().decode(
+            ATrustEnvironmentReportResponse.self,
+            from: data
+        )
+        guard result.code == 0 else {
+            throw ATrustAuthServiceError.rejected(result.code)
+        }
     }
 }

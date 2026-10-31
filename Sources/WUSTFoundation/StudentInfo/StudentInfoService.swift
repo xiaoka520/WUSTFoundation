@@ -18,9 +18,9 @@ public struct StudentInfoService {
         return request
     }
 
-    func fetchHTML(url: URL, cookie: String) async throws -> String {
+    func fetchHTML(url: URL, cookie: String, using session: URLSession) async throws -> String {
         let request = makeRequest(url: url, cookie: cookie)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw StudentInfoServiceError.invalidResponse
         }
@@ -33,13 +33,14 @@ public struct StudentInfoService {
         return html
     }
     
-    public func fetchStudentInfo(cookie: String) async throws -> StudentInfo {
+    public func fetchStudentInfo(cookie: String, using session: URLSession) async throws -> StudentInfo {
         guard let url = URL(string: "https://bkjx.wust.edu.cn/jsxsd/grxx/xsxx") else {
             throw StudentInfoServiceError.invalidURL
         }
         let html = try await fetchHTML(
             url: url,
-            cookie: cookie
+            cookie: cookie,
+            using: session
         )
         return try StudentInfoParser().parse(from: html)
     }

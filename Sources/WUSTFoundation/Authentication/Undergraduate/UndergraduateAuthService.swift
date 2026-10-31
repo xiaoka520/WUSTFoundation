@@ -137,6 +137,22 @@ public struct UndergraduateAuthService {
                 throw UndergraduateAuthServiceError.remoteSystemError
             }
         }
+    }
+    
+    public func login(
+        credential: UnionCredential,
+        using session: URLSession
+    ) async throws -> String {
+        let service = "https://bkjx.wust.edu.cn/jsxsd/"
+        let ticket = try await UnionAuthService().fetchServiceTicket(
+            credential: credential,
+            service: service,
+            using: session
+        )
+        return try await exchangeTicket(
+            ticket: ticket,
+            using: session
+        )
         
     }
 }
