@@ -1,4 +1,4 @@
-public struct StudentInfo {
+public struct StudentInfo: Sendable {
     public let name: String //姓名
     public let studentID: String //学号
     public let college: String //院系
