@@ -15,10 +15,12 @@ public actor WUSTLoginClient {
     private var loadedCredential = false
     private var pending: PendingVerification?
     private var version = 0
+    private var undergraduateSessionRevision = 0
+    private var undergraduateSessionNeedsRefresh = false
     private var loggingOut = false
     private var operation: (id: UUID, kind: OperationKind, task: Task<WUSTLoginResult, Error>)?
 
-    private enum OperationKind { case restore, login, verification }
+    private enum OperationKind { case restore, refresh, login, verification }
     private struct PendingVerification {
         let challenge: UnionVerificationChallenge
         let configuration: UnionLoginConfiguration
@@ -79,18 +81,77 @@ public actor WUSTLoginClient {
 
 
     public func fetchStudentInfo() async throws -> StudentInfo {
-        let result = try await ensureSession()
-        guard case .authenticated(let cookie) = result else {
-            throw WUSTLoginClientError.notAuthenticated
-        }
         let expectedVersion = version
-        let info = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: session)
+        let info = try await withUndergraduateSession { cookie, session in
+            try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: session)
+        }
         try checkActive(expectedVersion)
         guard info.studentID == username else {
             try await logout()
             throw WUSTLoginClientError.studentIDMismatch
         }
         return info
+    }
+
+    func withUndergraduateSession<Value: Sendable>(
+        retryOnAuthenticationFailure shouldRetry: @Sendable (any Error) -> Bool = { _ in false },
+        perform request: @Sendable (String, URLSession) async throws -> Value
+    ) async throws -> Value {
+        let expectedVersion = version
+        let result = try await ensureSession()
+        guard case .authenticated(let initialCookie) = result else {
+            throw WUSTLoginClientError.notAuthenticated
+        }
+        try checkActive(expectedVersion)
+
+        var cookie = initialCookie
+        var canRetry = true
+        while true {
+            let sessionRevision = undergraduateSessionRevision
+            do {
+                let value = try await request(cookie, session)
+                try checkActive(expectedVersion)
+                return value
+            } catch {
+                try checkActive(expectedVersion)
+                guard canRetry, shouldRetry(error) else {
+                    throw error
+                }
+            }
+
+            canRetry = false
+            let restored = try await refreshSession(
+                after: sessionRevision,
+                expectedVersion: expectedVersion
+            )
+            guard case .authenticated(let restoredCookie) = restored else {
+                throw WUSTLoginClientError.notAuthenticated
+            }
+            try checkActive(expectedVersion)
+            cookie = restoredCookie
+        }
+    }
+
+    private func refreshSession(
+        after failedRevision: Int,
+        expectedVersion: Int
+    ) async throws -> WUSTLoginResult {
+        try checkActive(expectedVersion)
+        if let active = operation {
+            guard active.kind == .restore || active.kind == .refresh else {
+                throw WUSTLoginClientError.operationInProgress
+            }
+            let result = try await active.task.value
+            if operation?.id == active.id { operation = nil }
+            guard case .authenticated = result else { return result }
+            try checkActive(expectedVersion)
+        }
+        if undergraduateSessionRevision != failedRevision {
+            return try await ensureSession()
+        }
+        return try await run(kind: .refresh) {
+            try await self.restore(forceRefresh: true)
+        }
     }
 
     public func logout() async throws {
@@ -105,6 +166,7 @@ public actor WUSTLoginClient {
         credential = nil
         loadedCredential = true
         pending = nil
+        undergraduateSessionNeedsRefresh = false
         session = Self.makeSession(configuration: configuration)
         if let task { _ = await task.result }
         try await store?.clearCredential(for: username)
@@ -116,7 +178,9 @@ public actor WUSTLoginClient {
     ) async throws -> WUSTLoginResult {
         guard !loggingOut else { throw WUSTLoginClientError.operationInProgress }
         if let active = operation {
-            guard kind == .restore, active.kind == .restore else {
+            let canShare = kind == .restore && (active.kind == .restore || active.kind == .refresh)
+                || kind == .refresh && active.kind == .refresh
+            guard canShare else {
                 throw WUSTLoginClientError.operationInProgress
             }
             return try await active.task.value
@@ -128,17 +192,20 @@ public actor WUSTLoginClient {
         return try await task.value
     }
 
-    private func restore() async throws -> WUSTLoginResult {
+    private func restore(forceRefresh: Bool = false) async throws -> WUSTLoginResult {
         let expectedVersion = version
+        if forceRefresh { undergraduateSessionNeedsRefresh = true }
         if let pending {
             return .verificationRequired(pending.challenge, methods: pending.methods)
         }
-        do {
-            let cookie = try await UndergraduateAuthService().currentSessionCookie(using: session)
-            try checkActive(expectedVersion)
-            return .authenticated(cookie: cookie)
-        } catch UndergraduateAuthServiceError.cookieMissing {
-        } catch UndergraduateAuthServiceError.invalidSession {}
+        if !undergraduateSessionNeedsRefresh {
+            do {
+                let cookie = try await UndergraduateAuthService().currentSessionCookie(using: session)
+                try checkActive(expectedVersion)
+                return .authenticated(cookie: cookie)
+            } catch UndergraduateAuthServiceError.cookieMissing {
+            } catch UndergraduateAuthServiceError.invalidSession {}
+        }
 
         if credential == nil, !loadedCredential {
             let saved = try await store?.loadCredential(for: username)
@@ -168,6 +235,7 @@ public actor WUSTLoginClient {
         let expectedVersion = version
         session.invalidateAndCancel()
         session = Self.makeSession(configuration: configuration)
+        undergraduateSessionNeedsRefresh = false
         pending = nil
         credential = nil
         loadedCredential = true
@@ -259,6 +327,8 @@ public actor WUSTLoginClient {
     private func establishUndergraduateSession(_ credential: UnionCredential, expectedVersion: Int) async throws -> WUSTLoginResult {
         let cookie = try await UndergraduateAuthService().login(credential: credential, using: session)
         try checkActive(expectedVersion)
+        undergraduateSessionRevision += 1
+        undergraduateSessionNeedsRefresh = false
         return .authenticated(cookie: cookie)
     }
 
@@ -269,6 +339,7 @@ public actor WUSTLoginClient {
         pending = nil
         session.invalidateAndCancel()
         session = Self.makeSession(configuration: configuration)
+        undergraduateSessionNeedsRefresh = false
         try await store?.clearCredential(for: username)
         try checkActive(expectedVersion)
         return .loginRequired

@@ -43,7 +43,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "WUSTDemo",
-            dependencies: ["WUSTFoundation"],
+            dependencies: [
+                "WUSTFoundation",
+                .product(name: "SwiftSoup", package: "SwiftSoup")
+            ],
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])
             ]

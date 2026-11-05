@@ -47,6 +47,24 @@ struct WUSTDemo {
             case .invalidData: log("已保存的凭据数据无效，请清除后重新登录。")
             }
             exit(EXIT_FAILURE)
+        } catch let error as TimetablePageCapture.CaptureError {
+            log("课表入口采集未完成：\(error)。")
+            exit(EXIT_FAILURE)
+        } catch let error as TimetableError {
+            log(TimetableDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as NoticeError {
+            log(NoticeDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as TrainingPlanError {
+            log(TrainingPlanDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as GradeError {
+            log(GradeDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as ExamError {
+            log(ExamDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
         } catch {
             log("演示未完成，错误类型：\(String(reflecting: type(of: error)))。")
             exit(EXIT_FAILURE)
@@ -54,6 +72,10 @@ struct WUSTDemo {
     }
 
     private static func run() async throws {
+        if CommandLine.arguments.contains("--notices") {
+            try await NoticeDemo.run()
+            return
+        }
         let username = try input("请输入账号（学号）：")
         let client = try makeClient(username: username)
         log("输入 1 恢复已保存的登录（默认），2 重新登录，3 清除本账号本地登录：")
@@ -99,22 +121,136 @@ struct WUSTDemo {
         guard describe(result) else { return }
         _ = try await client.fetchStudentInfo()
         log("学生信息读取成功，学号与登录账号一致。")
-        log("输入 1 在全新 client 中恢复，2 再次复用当前会话，3 退出并清除本地凭据，其他输入结束：")
-        switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
-        case "1":
-            let restored = try makeClient(username: username)
-            guard describe(try await restored.ensureSession()) else { return }
-            _ = try await restored.fetchStudentInfo()
-            log("全新 client 恢复与学生信息读取成功，未重新输入密码或发送短信。")
-        case "2":
-            guard describe(try await client.ensureSession()) else { return }
-            _ = try await client.fetchStudentInfo()
-            log("当前教务会话复用及学生信息读取成功。")
-        case "3":
-            try await client.logout()
-            log("本账号的本地凭据及当前 client 会话已清除。")
-        default: break
+        try await runSessionMenu(client: client, username: username)
+    }
+
+    private static func runSessionMenu(client: WUSTLoginClient, username: String) async throws {
+        var activeClient = client
+        while true {
+            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，其他输入结束：")
+            switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            case "1":
+                let restored = try makeClient(username: username)
+                guard describe(try await restored.ensureSession()) else { return }
+                _ = try await restored.fetchStudentInfo()
+                activeClient = restored
+                log("全新 client 恢复与学生信息读取成功；后续查询使用这个新会话。")
+            case "2":
+                guard describe(try await activeClient.ensureSession()) else { return }
+                _ = try await activeClient.fetchStudentInfo()
+                log("当前教务会话复用及学生信息读取成功。")
+            case "3":
+                try await activeClient.logout()
+                log("本账号的本地凭据及当前 client 会话已清除。")
+                return
+            case "4":
+                guard let credential = await activeClient.currentCredential() else {
+                    log("当前没有可用 TGT，请重新登录后采集。")
+                    continue
+                }
+                log("正在用已有 TGT 建立采集会话，并请求课表入口……")
+                let captured = try await TimetablePageCapture.capture(
+                    credential: credential,
+                    deviceID: loadOrCreateATrustDeviceID(),
+                    choose: chooseTimetableQuery,
+                    onSaved: { url in log("已保存原始响应：\(url.path)") }
+                )
+                log("入口原始响应：\(captured.entryURL.path)")
+                log("整学期 POST 响应：\(captured.semesterURL.path)")
+                if let weekURL = captured.weekURL {
+                    log("指定周次 POST 响应：\(weekURL.path)")
+                    log("筛选条件已在响应表单中确认；详细课表内容\(captured.weeklyContentChanged == true ? "有变化" : "相同，仍需结合该周课程核对")。")
+                }
+                log("原始 HTML 与请求条件、编码及摘要均已保存在本地。解析查询请使用菜单 5。")
+            case "5":
+                do {
+                    try await TimetableDemo.run(using: activeClient)
+                } catch let error as TimetableError {
+                    log(TimetableDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("课表查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "6":
+                do {
+                    try await TeachingCalendarDemo.run(using: activeClient)
+                } catch let error as TimetableError {
+                    log(TimetableDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("教学周查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "7":
+                try await NoticeDemo.run()
+            case "8":
+                do {
+                    try await TrainingPlanDemo.run(using: activeClient)
+                } catch let error as TrainingPlanError {
+                    log(TrainingPlanDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("培养方案查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "9":
+                do {
+                    try await GradeDemo.run(using: activeClient)
+                } catch let error as GradeError {
+                    log(GradeDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("成绩查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "10":
+                do {
+                    try await ExamDemo.run(using: activeClient)
+                } catch let error as ExamError {
+                    log(ExamDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("考试安排查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            default:
+                return
+            }
         }
+    }
+
+    private static func chooseTimetableQuery(_ form: TimetableCaptureForm) throws -> TimetableCaptureSelection {
+        log("服务器提供 \(form.terms.count) 个学期选项；以下为前 5 项：")
+        for term in form.terms.prefix(5) { log("\(term.value)  \(term.title)") }
+        log("当前学期：\(form.selectedTermID ?? "未明确")。输入目标学期 ID，回车保留当前值：")
+        guard let termInput = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) else { throw DemoError.missingInput }
+        let term = termInput.isEmpty ? (form.selectedTermID ?? "") : termInput
+        guard !term.isEmpty, form.terms.contains(where: { $0.value == term }) else {
+            throw TimetableCaptureError.invalidSelection
+        }
+        for (index, option) in form.templates.enumerated() { log("节次模式 \(index + 1)：\(option.title)") }
+        log("输入节次模式序号，回车保留当前模式：")
+        guard let templateInput = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) else { throw DemoError.missingInput }
+        let template: String
+        if templateInput.isEmpty { template = form.selectedTemplateID ?? "" }
+        else {
+            guard let index = Int(templateInput), index > 0, index <= form.templates.count else {
+                throw TimetableCaptureError.invalidSelection
+            }
+            template = form.templates[index - 1].value
+        }
+        let weekOptions = form.weeks.filter { !$0.value.isEmpty }
+        log("可验证周次：\(weekOptions.map(\.value).joined(separator: ", "))")
+        let defaultWeek = weekOptions.first?.value ?? ""
+        log("将先采集整学期，再采集指定周。输入周次，回车使用 \(defaultWeek)，输入“全部”跳过单周采集：")
+        guard let weekInput = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) else { throw DemoError.missingInput }
+        let week = weekInput == "全部" ? "" : (weekInput.isEmpty ? defaultWeek : weekInput)
+        guard form.weeks.contains(where: { $0.value == week }),
+              form.templates.contains(where: { $0.value == template }) else {
+            throw TimetableCaptureError.invalidSelection
+        }
+        return TimetableCaptureSelection(termID: term, week: week, templateID: template)
     }
 
     private static func makeClient(username: String) throws -> WUSTLoginClient {
