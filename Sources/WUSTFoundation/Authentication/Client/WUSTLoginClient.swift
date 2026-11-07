@@ -132,6 +132,27 @@ public actor WUSTLoginClient {
         }
     }
 
+    func withUnionCredentialAndSession<Value: Sendable>(
+        perform request: @Sendable (UnionCredential, URLSession) async throws -> Value
+    ) async throws -> Value {
+        let expectedVersion = version
+        let result = try await ensureSession()
+        guard case .authenticated = result else {
+            throw WUSTLoginClientError.notAuthenticated
+        }
+        try checkActive(expectedVersion)
+        if credential == nil, !loadedCredential {
+            let saved = try await store?.loadCredential(for: username)
+            try checkActive(expectedVersion)
+            credential = saved
+            loadedCredential = true
+        }
+        guard let credential else { throw WUSTLoginClientError.notAuthenticated }
+        let value = try await request(credential, session)
+        try checkActive(expectedVersion)
+        return value
+    }
+
     private func refreshSession(
         after failedRevision: Int,
         expectedVersion: Int

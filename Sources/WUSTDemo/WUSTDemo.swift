@@ -65,6 +65,15 @@ struct WUSTDemo {
         } catch let error as ExamError {
             log(ExamDemo.errorMessage(for: error))
             exit(EXIT_FAILURE)
+        } catch let error as LibraryError {
+            log(LibraryDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as CreditProgressError {
+            log(CreditProgressDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
+        } catch let error as CampusShuttleError {
+            log(CampusShuttleDemo.errorMessage(for: error))
+            exit(EXIT_FAILURE)
         } catch {
             log("演示未完成，错误类型：\(String(reflecting: type(of: error)))。")
             exit(EXIT_FAILURE)
@@ -119,6 +128,10 @@ struct WUSTDemo {
         }
         password = nil
         guard describe(result) else { return }
+        if CommandLine.arguments.contains("--shuttle") {
+            try await CampusShuttleDemo.run(using: client)
+            return
+        }
         _ = try await client.fetchStudentInfo()
         log("学生信息读取成功，学号与登录账号一致。")
         try await runSessionMenu(client: client, username: username)
@@ -127,7 +140,7 @@ struct WUSTDemo {
     private static func runSessionMenu(client: WUSTLoginClient, username: String) async throws {
         var activeClient = client
         while true {
-            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，其他输入结束：")
+            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，其他输入结束：")
             switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
             case "1":
                 let restored = try makeClient(username: username)
@@ -212,6 +225,35 @@ struct WUSTDemo {
                 } catch WUSTLoginClientError.notAuthenticated {
                     log("考试安排查询需要重新处理登录状态。")
                     _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "11":
+                do {
+                    try await CreditProgressDemo.run(using: activeClient)
+                } catch let error as CreditProgressError {
+                    log(CreditProgressDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("学分查询需要重新处理登录状态。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "12":
+                do {
+                    try await LibraryDemo.run(using: activeClient)
+                } catch let error as LibraryError {
+                    log(LibraryDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("图书馆查询需要可用的统一认证 TGT。请使用已保存或新登录的凭据。")
+                    _ = describe(try await activeClient.ensureSession())
+                    return
+                }
+            case "13":
+                do {
+                    try await CampusShuttleDemo.run(using: activeClient)
+                } catch let error as CampusShuttleError {
+                    log(CampusShuttleDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("校车查询需要可用的统一认证 TGT。")
                     return
                 }
             default:

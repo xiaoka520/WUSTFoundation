@@ -4,7 +4,7 @@
 
 ## 能做什么
 
-包封装了统一身份认证、图形验证码、短信二次验证、aTrust 回调与环境上报、教务 ST 换票、教务 Cookie 会话恢复，以及学生信息读取。课表的学期查询、整学期读取和本地筛选代码也已接入，见 [课表接入](Timetable.md)；用户已运行通过当前学期读取和部分筛选，其他学期及边界仍待验证。
+包封装了统一身份认证、图形验证码、短信二次验证、aTrust 回调与环境上报、教务 ST 换票、教务 Cookie 会话恢复，以及学生信息读取。课表和图书馆只读查询也已接入，分别见 [课表接入](Timetable.md) 和 [图书馆接入](Library.md)；课程与教学周路径已由用户运行，图书馆代码尚未运行验证。
 
 本文返回值示例使用虚构资料或明确的占位符。方法直接返回 Swift 类型；登录状态和学生信息当前没有 Codable 协议，不应将示例当作服务器 JSON 或声称可以直接用 JSONEncoder 编码。
 
@@ -122,6 +122,7 @@ additionalAuthenticationRequired(nextService: "auth/<尚未支持的步骤>")
 | `fetchAcademicTerms()` | `AcademicTermList` | 见 [课表返回示例](Timetable.md#2-让用户选择服务器提供的学期) |
 | `fetchTimetable(term:maxWeek:maxSection:)` | `Timetable` | 见 [整学期返回示例](Timetable.md#3-获取整学期课表) |
 | `fetchTeachingCalendar(on:)` | `TeachingCalendar` | 服务端周次校准及日期范围，见 [返回示例](TeachingCalendar.md#2-返回值示例)；正常校准和换周重新校准已由用户运行通过 |
+| `fetchLibraryDashboard()` | `LibraryDashboard` | 图书馆统计、当前借阅和即将到期列表。五项统计及各卡片的明细查询见 [图书馆接入](Library.md) |
 | `logout()` | `Void`，即 `()` | 本地清理完成；不返回服务端注销状态 |
 
 `Void` 方法不返回服务器的业务码、短信内容或 `true`；错误通过 `throws` 传递。`currentCredential()` 是读取当前内存中的凭据，不触发 Keychain 加载、登录或有效性校验，因此 nil 本身不等于服务器宣布 TGT 失效。
@@ -235,6 +236,7 @@ StudentInfo(
 - `StudentInfoService.fetchStudentInfo(cookie:using:)`：自己提供已建立的 Cookie 和 session。
 - `TimetableService.fetchAcademicTerms(cookie:using:)`、`fetchTimetable(term:cookie:using:)`：使用已有会话查询课表；低层不自动恢复认证。
 - `TeachingCalendarService.fetchTeachingCalendar(on:cookie:using:)`：按日期查询服务器周次并建立日期换算模型；低层不自动恢复认证。
+- `LibraryService.fetchDashboard(credential:using:)`：使用已有 TGT 建立图书馆 Cookie 会话，并读取统计、当前借阅和即将到期；低层不自动恢复认证。
 
 直接账号密码换服务票据的旧 `UndergraduateAuthService.login(username:password:...)` 与 `ATrustAuthService.beginLogin(...)` 已标记 deprecated。新 App 优先用 WUSTLoginClient；需自定义流程时使用返回 `UnionLoginResult` 的新低层登录接口。
 
@@ -287,7 +289,7 @@ Xcode Package Scheme 运行时，选择真正的控制台：菜单 View → Debu
 2. 重新登录：清除该账号旧 TGT 后从账号密码重新认证。
 3. 清除本地登录：删除 Demo 的本地 TGT 和当前 client 会话。
 
-短信界面由 Demo 等待用户明确选择发送后才调用接口。首次成功后进入循环菜单，可选择在新的 client/URLSession 中恢复、继续复用当前业务会话、清除登录、采集原始课表（菜单 4）、查询结构化课表（菜单 5）或查询教学周日期（菜单 6）。切换到新的 client 后，后续菜单使用恢复后的会话。Demo 的 Keychain service 是 `WUSTFoundation.WUSTDemo.UnionCredential`；只在这份示例中使用，不与生产 App 共用访问组。
+短信界面由 Demo 等待用户明确选择发送后才调用接口。首次成功后进入循环菜单，可选择在新的 client/URLSession 中恢复、继续复用当前业务会话、清除登录、采集原始课表（菜单 4）、查询结构化课表（菜单 5）、查询教学周日期（菜单 6）或查询图书馆只读信息（菜单 12）。切换到新的 client 后，后续菜单使用恢复后的会话。Demo 的 Keychain service 是 `WUSTFoundation.WUSTDemo.UnionCredential`；只在这份示例中使用，不与生产 App 共用访问组。
 
 运行时示例目前是 macOS Demo，不代表在 iPhone 真机、iOS App 或 watchOS App 已完成集成测试。
 

@@ -17,6 +17,7 @@ let package = Package(
             targets: ["WUSTFoundation"]
         ),
         .executable(name: "WUSTDemo", targets: ["WUSTDemo"]),
+        .executable(name: "WUSTLaundryDemo", targets: ["WUSTLaundryDemo"]),
     ],
     dependencies: [
         .package(
@@ -40,6 +41,10 @@ let package = Package(
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
             ],
+        ),
+        .executableTarget(
+            name: "WUSTLaundryDemo",
+            dependencies: ["WUSTFoundation"]
         ),
         .executableTarget(
             name: "WUSTDemo",
