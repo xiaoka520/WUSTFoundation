@@ -6,10 +6,11 @@ import WUSTFoundation
 struct WUSTLaundryDemo {
     static func main() async {
         do {
-            log("胖乖生活演示。输入 1 查询洗衣机，2 测试登录，0 退出。")
+            log("胖乖生活演示。输入 1 查询洗衣机，2 测试登录，3 查询使用中洗衣机剩余时间，0 退出。")
             switch readInput() {
             case "1": try await showDevices()
             case "2": try await testLogin()
+            case "3": try await showRunningWashers()
             default: return
             }
         } catch let error as LaundryQueryError {
@@ -22,6 +23,51 @@ struct WUSTLaundryDemo {
             log("钥匙串操作失败（\(status)）。")
         } catch {
             log("测试未完成（\(type(of: error))）。")
+        }
+    }
+
+    private static func showRunningWashers() async throws {
+        guard let credential = try LaundryDemoCredentialStore().load() else {
+            log("暂无已保存的胖乖登录，请先运行菜单 2 完成登录。")
+            return
+        }
+        let service = LaundryOrderService()
+        log("正在查询使用中的洗衣机订单……")
+        var snapshots = try await service.fetchRunningWashers(credential: credential)
+        var monitors = snapshots.map {
+            LaundryOrderMonitor(orderID: $0.order.id, credential: credential, service: service, initialSnapshot: $0)
+        }
+        while true {
+            if snapshots.isEmpty { log("当前没有使用中的洗衣机订单。") }
+            for snapshot in snapshots {
+                if !snapshot.order.isRunningWasher {
+                    let status = snapshot.order.orderStatus == 3 ? "已完成" : "状态已变化"
+                    log("\(snapshot.order.machineName ?? "未提供设备名")，\(status)。")
+                    continue
+                }
+                let remaining = snapshot.remainingSeconds(at: Date()).map { "\($0 / 60) 分 \($0 % 60) 秒" } ?? "未提供"
+                log("\(snapshot.order.machineName ?? "未提供设备名")，剩余时间 \(remaining)。")
+                if let end = snapshot.estimatedCompletionTime {
+                    let formatter = DateFormatter()
+                    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+                    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                    log("预计结束 \(formatter.string(from: end))（北京时间）。")
+                }
+            }
+            log("输入 1 更新当前订单剩余时间，2 重新查找使用中订单，其他输入退出。")
+            switch readInput() {
+            case "1":
+                var updated: [LaundryOrderSnapshot] = []
+                for monitor in monitors { updated.append(try await monitor.currentSnapshot()) }
+                snapshots = updated
+            case "2":
+                snapshots = try await service.fetchRunningWashers(credential: credential)
+                monitors = snapshots.map {
+                    LaundryOrderMonitor(orderID: $0.order.id, credential: credential, service: service, initialSnapshot: $0)
+                }
+            default:
+                return
+            }
         }
     }
 

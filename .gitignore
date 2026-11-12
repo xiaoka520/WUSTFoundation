@@ -10,3 +10,4 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 .swiftpm/xcode/xcshareddata/
 /TestData/
+/default.profraw

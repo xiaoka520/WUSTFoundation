@@ -15,6 +15,7 @@
 - 课程成绩筛选、返回字段与示例：[成绩接入](Documentation/Grades.md)
 - 考试安排、分类列表与日期时间：[考试安排接入](Documentation/Exams.md)
 - 毕业学分进度、历史统计及修读明细：[学分完成情况接入](Documentation/CreditProgress.md)
+- 第二课堂成绩单与零要求过滤 [接入文档](Documentation/SecondClass.md)
 - watchOS 后续能力与跨设备凭据方案：[watchOS 规划](Documentation/WatchOSPlan.md)（规划中，尚未声明支持）
 - 交互演示：`swift run WUSTDemo`
 - 本地合成协议回归：`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
@@ -33,12 +34,12 @@ App 负责界面和凭据存储策略；包负责认证协议、会话复用与�
 - [x] 培养方案解析（说明正文、合并表格、会话接入）
 - [x] 学分完成情况（毕业学分进度、历史统计与修读明细）
 - [x] 考试安排查询（双表解析、日期时间、会话接入与 Demo 已写入，待验证）
-- [ ] 第二学堂
+- [x] 第二课堂成绩单（分类学分要求、已获学分、总学分与评价；待真实账号验证）
 - [ ] 双创学分
 - [ ] 研究生支持
 - [ ] watchOS核心功能支持
 - [ ] 学校日历解析
 - [x] 空闲洗衣机获取
-- [ ] 洗衣机时间监测
+- [x] 使用中洗衣机剩余时间查询（订单分页、预计结束时间和倒计时快照）
 - [ ] 洗衣机解析
 - [ ] 饮水机解析

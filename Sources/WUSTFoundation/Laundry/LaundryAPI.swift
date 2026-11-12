@@ -23,12 +23,28 @@ struct LaundryAPI: Sendable {
     }
 
     func post<Payload: Decodable>(_ path: String, fields: [String: String]) async throws -> Payload? {
+        let response: Response<Payload> = try await request(path, method: "POST", fields: fields)
+        return response.data
+    }
+
+    struct Response<Payload> {
+        let data: Payload?
+        let observedAt: Date
+        let serverDate: Date
+    }
+
+    func request<Payload: Decodable>(
+        _ path: String, method: String, fields: [String: String]
+    ) async throws -> Response<Payload> {
         var form = URLComponents()
         form.queryItems = fields.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let body = form.percentEncodedQuery else { throw LaundryQueryError.invalidResponse }
-        let url = Self.baseURL.appendingPathComponent(path)
+        let encoded = body.replacingOccurrences(of: "+", with: "%2B")
+        var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if method == "GET" { components.percentEncodedQuery = encoded }
+        guard let url = components.url else { throw LaundryQueryError.invalidResponse }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.httpShouldHandleCookies = false
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         switch profile {
@@ -45,9 +61,10 @@ struct LaundryAPI: Sendable {
                 forHTTPHeaderField: "User-Agent"
             )
         }
-        request.httpBody = Data(body.replacingOccurrences(of: "+", with: "%2B").utf8)
+        if method != "GET" { request.httpBody = Data(encoded.utf8) }
 
         let (data, response) = try await session.data(for: request, delegate: RejectLaundryRedirects())
+        let observedAt = Date()
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, http.url == url else { throw LaundryQueryError.invalidResponse }
         guard http.statusCode == 200 else { throw LaundryQueryError.unexpectedStatusCode(http.statusCode) }
@@ -55,7 +72,12 @@ struct LaundryAPI: Sendable {
             throw LaundryQueryError.invalidResponse
         }
         guard envelope.code == 0 else { throw LaundryQueryError.rejected(envelope.code) }
-        return envelope.data
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+        let serverDate = http.value(forHTTPHeaderField: "Date").flatMap(formatter.date(from:)) ?? observedAt
+        return Response(data: envelope.data, observedAt: observedAt, serverDate: serverDate)
     }
 
     private struct Envelope<Payload: Decodable>: Decodable {

@@ -140,7 +140,7 @@ struct WUSTDemo {
     private static func runSessionMenu(client: WUSTLoginClient, username: String) async throws {
         var activeClient = client
         while true {
-            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，其他输入结束：")
+            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，14 查询第二课堂成绩单，其他输入结束：")
             switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
             case "1":
                 let restored = try makeClient(username: username)
@@ -254,6 +254,15 @@ struct WUSTDemo {
                     log(CampusShuttleDemo.errorMessage(for: error))
                 } catch WUSTLoginClientError.notAuthenticated {
                     log("校车查询需要可用的统一认证 TGT。")
+                    return
+                }
+            case "14":
+                do {
+                    try await SecondClassDemo.run(using: activeClient)
+                } catch let error as SecondClassError {
+                    log(SecondClassDemo.errorMessage(for: error))
+                } catch WUSTLoginClientError.notAuthenticated {
+                    log("第二课堂查询需要可用的统一认证 TGT。")
                     return
                 }
             default:
