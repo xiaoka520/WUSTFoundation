@@ -8,6 +8,7 @@ public enum ATrustAuthServiceError: Error {
     case invalidConfiguration
     case casLoginNotFound
     case invalidRedirect
+    case webLoginRequired
     case serviceNotFound
     case requestFailed(operation: String, statusCode: Int, businessCode: Int?)
     case invalidEnvironmentTicket

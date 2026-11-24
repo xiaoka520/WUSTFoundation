@@ -1,6 +1,14 @@
 # 登录与会话接入
 
-更新：2026-11-05。本文说明当前 `WUSTLoginClient` 的调用顺序、状态含义、凭据保存和错误处理。`Docs/login-design.md` 是早期调研草案；接口与实际行为以本文件和当前 Swift 源码为准。
+更新日期为 2026-11-24。本文说明 `WUSTLoginClient` 的调用顺序、状态含义、凭据保存和错误处理。
+
+## 新版统一认证的学号登录
+
+学校旧登录入口已转到 `/authserver/login`。新版会在输入学号后检查是否需要验证码，当前配置在需要时使用滑块。在 macOS 的 `WUSTDemo` 中输入学号并选 **2**，打开学校认证窗口。选「账号登录」，在网页输入同一学号与密码，有滑块时在网页中完成验证。进入教务后点窗口上方的「检查教务登录」。
+
+App 可以用 `UndergraduateWebLogin.makeWebView()` 创建临时 `WKWebView`，再加载 `UndergraduateWebLogin.url`。用户回到教务页面后，用相同学号初始化 `WUSTLoginClient`，调用 `try await UndergraduateWebLogin.complete(in: webView, using: client)`。它会接入教务站点的会话并校验学生信息中的学号。成功后，同一 client 可以继续查询课表、成绩和其他教务数据。
+
+这个入口只建立当前 client 的教务会话。会话过期或 App 重启后，用户可以重新打开网页登录。图书馆、校车和第二课堂等依赖旧统一认证票据的接口需要各自验证新版登录接入。
 
 ## 能做什么
 
@@ -10,7 +18,7 @@
 
 完整登录流程由 `WUSTLoginClient` 编排。App 仍可使用 Union、aTrust、Undergraduate 的低层接口自行换票。低层入口需要调用方传入同一 `URLSession`，自行承担顺序和 Cookie 容器。
 
-当前支持 iOS 15+、macOS 15+、visionOS 1+。macOS Demo 使用 Vision 识别算术验证码。watchOS 尚未加入 Package.swift 支持；该平台规划中只提供选定只读功能，首次认证由配对 iPhone 等设备完成，见 [watchOS 规划](WatchOSPlan.md)。
+当前支持 iOS 15+、macOS 15+、visionOS 1+。旧认证流程使用 Vision 识别算术验证码。watchOS 的首次认证规划由配对 iPhone 等设备完成，见 [watchOS 规划](WatchOSPlan.md)。
 
 ## 认证过程中会遇到的凭据
 

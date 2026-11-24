@@ -13,6 +13,12 @@ struct WUSTDemo {
             exit(EXIT_FAILURE)
         } catch is CancellationError {
             log("操作已取消。")
+        } catch let error as AuthServerLoginError {
+            log("新版账号登录未完成：\(error)。若学校要求其他验证，可使用网页登录入口。")
+            exit(EXIT_FAILURE)
+        } catch let error as SliderCaptchaError {
+            log("滑块验证未完成：\(error)。")
+            exit(EXIT_FAILURE)
         } catch let error as WUSTLoginClientError {
             log("登录流程未完成：\(error)。")
             exit(EXIT_FAILURE)
@@ -31,6 +37,7 @@ struct WUSTDemo {
             exit(EXIT_FAILURE)
         } catch let error as ATrustAuthServiceError {
             switch error {
+            case .webLoginRequired: log("学校已切换到新版认证页面，请使用网页登录。")
             case .rejected(let code): log("aTrust 拒绝认证（业务码 \(code)）。")
             case .unexpectedStatusCode(let code): log("aTrust 请求失败（HTTP \(code)）。")
             case .requestFailed(_, let status, let code):
@@ -81,35 +88,55 @@ struct WUSTDemo {
     }
 
     private static func run() async throws {
+        if CommandLine.arguments.contains("--slider-captcha") {
+            try await SliderCaptchaDemo.run()
+            return
+        }
         if CommandLine.arguments.contains("--notices") {
             try await NoticeDemo.run()
             return
         }
         let username = try input("请输入账号（学号）：")
         let client = try makeClient(username: username)
-        log("输入 1 恢复已保存的登录（默认），2 重新登录，3 清除本账号本地登录：")
-        let choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let choice: String?
+        if CommandLine.arguments.contains("--native-login") {
+            choice = "4"
+        } else {
+            log("输入 1 恢复已保存的登录（默认），2 在学校网页用学号登录，3 清除本账号本地登录，4 使用新版接口自动登录：")
+            choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if choice == "4" {
+            let password = try await DemoPasswordInput.read()
+            log("正在通过新版接口登录并自动校验滑块……")
+            let result = try await client.loginWithAuthServer(password: password)
+            guard describe(result) else { return }
+            _ = try await client.fetchStudentInfo()
+            log("新版登录与学生信息读取成功，学号与登录账号一致。")
+            try await runSessionMenu(client: client, username: username)
+            return
+        }
         if choice == "3" {
             try await client.logout()
             log("已清除本账号的本地 TGT 和会话；未撤销服务端或其他 App 的登录。")
             return
         }
-        var password: String? = nil
         var result: WUSTLoginResult
+        #if os(macOS)
         if choice == "2" {
-            let value = try input("请输入密码：")
-            password = value
-            log("正在进行统一认证及会话建立……")
-            result = try await client.login(password: value)
+            result = try await WebLoginDemo.run(using: client)
         } else {
             log("正在尝试复用或恢复登录……")
-            result = try await client.ensureSession()
+            do { result = try await client.ensureSession() }
+            catch ATrustAuthServiceError.webLoginRequired { result = .loginRequired }
+            if case .loginRequired = result { result = try await WebLoginDemo.run(using: client) }
         }
+        #else
+        if choice == "2" { throw ATrustAuthServiceError.webLoginRequired }
+        result = try await client.ensureSession()
         if case .loginRequired = result {
-            let value = try input("没有可用 TGT，或 TGT 已失效。请输入密码：")
-            password = value
-            result = try await client.login(password: value)
+            throw ATrustAuthServiceError.webLoginRequired
         }
+        #endif
         if case .verificationRequired(_, let methods) = result {
             log("统一认证要求二次验证；可用方式：\(methods.map { $0 == .sms ? "短信" : "微信" }.joined(separator: "、"))")
             guard methods.contains(.sms) else {
@@ -120,13 +147,10 @@ struct WUSTDemo {
             guard readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return }
             try await client.sendSMSCode()
             let code = try input("服务器已确认发送，请输入短信验证码：")
-            let value: String
-            if let password { value = password }
-            else { value = try input("请输入密码以继续统一认证：") }
+            let value = try input("请输入密码以继续统一认证：")
             log("正在校验短信并继续登录……")
             result = try await client.submitSMSCode(code, password: value)
         }
-        password = nil
         guard describe(result) else { return }
         if CommandLine.arguments.contains("--shuttle") {
             try await CampusShuttleDemo.run(using: client)
@@ -313,7 +337,7 @@ struct WUSTDemo {
 
     private static func describe(_ result: WUSTLoginResult) -> Bool {
         switch result {
-        case .authenticated: log("aTrust 与教务会话已就绪。请勿打印 Cookie 或 TGT。") ; return true
+        case .authenticated: log("教务会话已就绪。") ; return true
         case .loginRequired: log("TGT 不可用，需要重新登录。")
         case .verificationRequired: log("服务器仍要求二次验证，本次演示停止，不自动重复发送短信。")
         case .additionalAuthenticationRequired: log("aTrust 要求尚未接入的后续认证，本次演示停止。")

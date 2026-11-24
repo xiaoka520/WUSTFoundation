@@ -64,6 +64,59 @@ public actor WUSTLoginClient {
         try await run(kind: .login) { try await self.performLogin(password: password) }
     }
 
+    /// New authserver password flow. Slider verification is performed automatically.
+    /// Success requires reading the student card and matching this client's account.
+    public func loginWithAuthServer(password: String) async throws -> WUSTLoginResult {
+        try await run(kind: .login) { try await self.performAuthServerLogin(password: password) }
+    }
+
+    private func performAuthServerLogin(password: String) async throws -> WUSTLoginResult {
+        let expectedVersion = version
+        let candidate = Self.makeSession(configuration: configuration)
+        defer { candidate.invalidateAndCancel() }
+        try await AuthServerLoginService().login(username: username, password: password, using: candidate)
+        try checkActive(expectedVersion)
+        let cookies = candidate.configuration.httpCookieStorage?.cookies ?? []
+        return try await validateUndergraduateWebSession(cookies)
+    }
+
+    func adoptUndergraduateWebSession(_ cookies: [HTTPCookie]) async throws -> WUSTLoginResult {
+        try await run(kind: .login) { try await self.validateUndergraduateWebSession(cookies) }
+    }
+
+    private func validateUndergraduateWebSession(_ cookies: [HTTPCookie]) async throws -> WUSTLoginResult {
+        let expectedVersion = version
+        let url = URL(string: "https://bkjx.wust.edu.cn/jsxsd/grxx/xsxx")!
+        let candidate = Self.makeSession(configuration: configuration)
+        var accepted = false
+        defer { if !accepted { candidate.invalidateAndCancel() } }
+
+        let undergraduateCookies = cookies.filter {
+            $0.domain.trimmingPrefix(".").lowercased() == url.host
+        }
+        guard !undergraduateCookies.isEmpty, let storage = candidate.configuration.httpCookieStorage else {
+            throw UndergraduateAuthServiceError.cookieMissing
+        }
+        storage.setCookies(undergraduateCookies, for: url, mainDocumentURL: url)
+
+        let cookie = try await UndergraduateAuthService().currentSessionCookie(using: candidate)
+        try checkActive(expectedVersion)
+        let info = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: candidate)
+        try checkActive(expectedVersion)
+        guard info.studentID == username else { throw WUSTLoginClientError.studentIDMismatch }
+
+        version += 1
+        session.invalidateAndCancel()
+        session = candidate
+        accepted = true
+        pending = nil
+        credential = nil
+        loadedCredential = true
+        undergraduateSessionRevision += 1
+        undergraduateSessionNeedsRefresh = false
+        return .authenticated(cookie: cookie)
+    }
+
 
     public func sendSMSCode() async throws {
         _ = try await run(kind: .verification) { try await self.performSendSMS() }

@@ -65,7 +65,14 @@ extension ATrustAuthService {
         guard let finalURL = httpResponse.url else {
             throw ATrustAuthServiceError.invalidRedirect
         }
-        guard finalURL.host == "auth.wust.edu.cn" && finalURL.path == "/lyuapServer/login" else {
+        guard finalURL.scheme == "https", finalURL.host == "auth.wust.edu.cn",
+              finalURL.port == nil || finalURL.port == 443 else {
+            throw ATrustAuthServiceError.invalidRedirect
+        }
+        if finalURL.path == "/authserver/login" {
+            throw ATrustAuthServiceError.webLoginRequired
+        }
+        guard finalURL.path == "/lyuapServer/login" else {
             throw ATrustAuthServiceError.invalidRedirect
         }
 
