@@ -92,7 +92,8 @@ public actor WUSTLoginClient {
         defer { if !accepted { candidate.invalidateAndCancel() } }
 
         let undergraduateCookies = cookies.filter {
-            $0.domain.trimmingPrefix(".").lowercased() == url.host
+            let domain = $0.domain.hasPrefix(".") ? String($0.domain.dropFirst()) : $0.domain
+            return domain.lowercased() == url.host
         }
         guard !undergraduateCookies.isEmpty, let storage = candidate.configuration.httpCookieStorage else {
             throw UndergraduateAuthServiceError.cookieMissing
