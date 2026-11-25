@@ -1,6 +1,6 @@
 # 登录与会话接入
 
-更新日期为 2026-11-24。本文说明 `WUSTLoginClient` 的调用顺序、状态含义、凭据保存和错误处理。
+更新日期为 2026-11-25。本文说明 `WUSTLoginClient` 的调用顺序、状态含义、凭据保存和错误处理。
 
 ## 新版统一认证的学号登录
 
@@ -9,6 +9,29 @@
 App 可以用 `UndergraduateWebLogin.makeWebView()` 创建临时 `WKWebView`，再加载 `UndergraduateWebLogin.url`。用户回到教务页面后，用相同学号初始化 `WUSTLoginClient`，调用 `try await UndergraduateWebLogin.complete(in: webView, using: client)`。它会接入教务站点的会话并校验学生信息中的学号。成功后，同一 client 可以继续查询课表、成绩和其他教务数据。
 
 这个入口只建立当前 client 的教务会话。会话过期或 App 重启后，用户可以重新打开网页登录。图书馆、校车和第二课堂等依赖旧统一认证票据的接口需要各自验证新版登录接入。
+
+## 新版手机号短信登录
+
+先用学号创建并保留 `WUSTLoginClient`。用户提交已绑定的手机号或学号后，申请短信，再提交收到的数字验证码。
+
+```swift
+let client = try WUSTLoginClient(username: studentID, deviceID: appSavedDeviceID)
+let resendAfterSeconds = try await client.sendLoginSMSCode(to: phoneOrStudentID)
+let result = try await client.loginWithSMSCode(smsCode)
+if case .authenticated = result {
+    let terms = try await client.fetchAcademicTerms()
+}
+```
+
+`sendLoginSMSCode` 先读取官网短信表单，在同一临时会话完成滑块校验，按官网规则加密接收账号，再向 `/authserver/dynamicCode/getDynamicCode.htl` 申请一次短信。只有业务码 `success` 才返回，返回的可选整数为服务器提供的重发等待秒数。App 根据此值显示重发等待时间。滑块校验失败时错误向上传递。
+
+`loginWithSMSCode` 以 `cllt=dynamicLogin`、短信码和该会话的动态表单参数提交 `/authserver/login`，随后检查教务会话并读取学生信息核对学号，成功后接入当前 client。短信码被拒绝并返回登录表单时，client 保留服务器更新后的表单参数，App 可以让用户更正短信码后再次调用。网络异常或额外验证通过错误报告。开始另一种登录、重新申请短信或退出时，待提交的短信登录会话会被清理。
+
+此流程建立当前 client 的教务会话。账号隔离以创建 client 时的学号为准，手机号用于接收验证码。会话过期后的交互由 App 展示登录页面或重新申请短信。
+
+在 `WUSTDemo` 的登录菜单选择 `5`，或运行 `swift run WUSTDemo --sms-login`。Demo 提示输入绑定手机号或学号，回车使用当前学号，再通过隐藏输入接收短信码。macOS 下自动滑块失败时会打开官方短信登录页面，用户完成验证后点击「检查教务登录」。短信申请采用一次网络提交，滑块校验最多尝试三次。短信码保留在当次交互中。
+
+官网表单、加密字段与接口已核对，合成响应测试覆盖发送业务码、滑块失败阻止发短信、表单执行令牌更新、提交字段与退出时的状态清理。真实短信收取及登录闭环仍待实际账号验证，自动滑块通过率沿用现有模块的验证状态。
 
 ## 能做什么
 

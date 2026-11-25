@@ -8,6 +8,7 @@ public enum AuthServerLoginError: Error, Sendable, Equatable {
     case unexpectedStatusCode(Int)
     /// The server returned to its authentication UI (rejected credentials or another verification step).
     case loginNotCompleted
+    case smsCodeRejected(String)
 }
 
 /// Password login for the new CAS form, including native slider verification.
@@ -90,7 +91,7 @@ public struct AuthServerLoginService: Sendable {
         return request
     }
 
-    private static func http(_ response: URLResponse) throws -> HTTPURLResponse {
+    static func http(_ response: URLResponse) throws -> HTTPURLResponse {
         guard let response = response as? HTTPURLResponse, response.url != nil else {
             throw AuthServerLoginError.invalidResponse
         }

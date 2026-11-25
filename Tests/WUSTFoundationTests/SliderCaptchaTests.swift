@@ -156,7 +156,7 @@ struct SliderCaptchaTests {
         return (URLSession(configuration: configuration), URL(string: "https://\(host)/")!, host)
     }
 
-    private static func challenge(duplicateTarget: Bool = false) throws -> SliderCaptcha {
+    static func challenge(duplicateTarget: Bool = false) throws -> SliderCaptcha {
         let width = 240, height = 80, pieceWidth = 40, offset = 90
         var background = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {

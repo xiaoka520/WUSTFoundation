@@ -6,6 +6,7 @@ import WUSTFoundation
 @MainActor
 final class WebLoginDemo: NSObject, NSWindowDelegate {
     private let client: WUSTLoginClient
+    private let smsLogin: Bool
     private let webView = UndergraduateWebLogin.makeWebView()
     private let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760),
@@ -15,12 +16,13 @@ final class WebLoginDemo: NSObject, NSWindowDelegate {
     private lazy var confirmButton = NSButton(title: "检查教务登录", target: self, action: #selector(checkLogin))
     private var continuation: CheckedContinuation<WUSTLoginResult, Error>?
 
-    private init(client: WUSTLoginClient) {
+    private init(client: WUSTLoginClient, smsLogin: Bool) {
         self.client = client
+        self.smsLogin = smsLogin
     }
 
-    static func run(using client: WUSTLoginClient) async throws -> WUSTLoginResult {
-        let demo = WebLoginDemo(client: client)
+    static func run(using client: WUSTLoginClient, smsLogin: Bool = false) async throws -> WUSTLoginResult {
+        let demo = WebLoginDemo(client: client, smsLogin: smsLogin)
         return try await demo.present()
     }
 
@@ -30,6 +32,7 @@ final class WebLoginDemo: NSObject, NSWindowDelegate {
         window.title = "武汉科技大学 · 教务登录"
         window.isReleasedWhenClosed = false
         window.delegate = self
+        if smsLogin { status.stringValue = "选择「短信登录」，使用当前学号绑定的手机号完成登录，再检查教务登录。" }
 
         let content = NSView()
         let toolbar = NSStackView(views: [status, confirmButton])
@@ -51,7 +54,11 @@ final class WebLoginDemo: NSObject, NSWindowDelegate {
 
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
-            webView.load(URLRequest(url: UndergraduateWebLogin.url))
+            var components = URLComponents(url: UndergraduateWebLogin.url, resolvingAgainstBaseURL: false)!
+            if smsLogin {
+                components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "type", value: "dynamicLogin")]
+            }
+            webView.load(URLRequest(url: components.url!))
             window.center()
             window.makeKeyAndOrderFront(nil)
             app.activate()

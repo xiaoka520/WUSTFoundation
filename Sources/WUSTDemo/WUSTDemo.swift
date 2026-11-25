@@ -20,7 +20,12 @@ struct WUSTDemo {
             }
             exit(EXIT_FAILURE)
         } catch let error as AuthServerLoginError {
-            log("新版账号登录未完成：\(error)。若学校要求其他验证，可使用网页登录入口。")
+            if case .smsCodeRejected(let code) = error {
+                let safeCode = code.range(of: #"\A[A-Za-z0-9_]{1,32}\z"#, options: .regularExpression) != nil ? code : "UNKNOWN"
+                log("学校未确认短信发送（业务码 \(safeCode)），请稍后再试或使用网页登录。")
+            } else {
+                log("新版认证登录未完成：\(error)。若学校要求其他验证，可使用网页登录入口。")
+            }
             exit(EXIT_FAILURE)
         } catch let error as SliderCaptchaError {
             log("滑块验证未完成：\(error)。")
@@ -118,7 +123,7 @@ struct WUSTDemo {
             try await NoticeDemo.run()
             return
         }
-        let savedLogin = DemoLoginFile.exists ? try DemoLoginFile.load() : nil
+        let savedLogin = !CommandLine.arguments.contains("--sms-login") && DemoLoginFile.exists ? try DemoLoginFile.load() : nil
         let username: String
         if let savedLogin {
             username = savedLogin.username
@@ -128,11 +133,49 @@ struct WUSTDemo {
         }
         let client = try makeClient(username: username)
         let choice: String?
-        if CommandLine.arguments.contains("--native-login") {
+        if CommandLine.arguments.contains("--sms-login") {
+            choice = "5"
+        } else if CommandLine.arguments.contains("--native-login") {
             choice = "4"
         } else {
-            log("输入 1 恢复已保存的登录（默认），2 在学校网页用学号登录，3 清除本账号本地登录，4 使用新版接口自动登录：")
+            log("输入 1 恢复已保存的登录（默认），2 在学校网页用学号登录，3 清除本账号本地登录，4 使用新版接口自动登录，5 短信登录：")
             choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if choice == "5" {
+            log("请输入接收短信的绑定手机号或学号，回车使用当前学号。提交后会校验滑块并申请一次短信：")
+            guard let entered = readLine() else { throw DemoError.missingInput }
+            let account = entered.trimmingCharacters(in: .whitespacesAndNewlines)
+            let diagnostics = DemoCaptchaDiagnostics()
+            diagnostics.begin(1)
+            var outcome = "短信申请未完成"
+            defer {
+                do { log("短信登录诊断日志：\(try diagnostics.save(outcome: outcome).path)") }
+                catch { log("诊断日志保存失败（\(type(of: error))）。") }
+            }
+            let result: WUSTLoginResult
+            do {
+                let resendAfter = try await client.sendLoginSMSCode(to: account.isEmpty ? username : account) {
+                    diagnostics.record($0, attempt: 1)
+                }
+                outcome = "短信已发送"
+                log("服务器已确认短信发送。")
+                if let resendAfter { log("服务器要求 \(resendAfter) 秒后再申请。") }
+                let code = try await DemoPasswordInput.readCode()
+                result = try await client.loginWithSMSCode(code)
+            } catch let error as SliderCaptchaError {
+                #if os(macOS)
+                log("自动滑块校验未通过（\(error)），正在打开学校短信登录页。")
+                result = try await WebLoginDemo.run(using: client, smsLogin: true)
+                #else
+                throw error
+                #endif
+            }
+            guard describe(result) else { return }
+            _ = try await client.fetchStudentInfo()
+            outcome = "短信登录及学号校验完成"
+            log("短信登录及学生信息读取成功，学号与当前账号一致。")
+            try await runSessionMenu(client: client, username: username)
+            return
         }
         if choice == "4" {
             let password: String

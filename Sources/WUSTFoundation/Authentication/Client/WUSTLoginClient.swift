@@ -14,6 +14,7 @@ public actor WUSTLoginClient {
     private var credential: UnionCredential?
     private var loadedCredential = false
     private var pending: PendingVerification?
+    private var pendingSMSLogin: (context: AuthServerSMSLoginContext, session: URLSession)?
     private var version = 0
     private var undergraduateSessionRevision = 0
     private var undergraduateSessionNeedsRefresh = false
@@ -52,7 +53,10 @@ public actor WUSTLoginClient {
         self.solver = captchaSolver ?? { captcha in try Self.recognizeCaptcha(captcha) }
     }
 
-    deinit { session.invalidateAndCancel() }
+    deinit {
+        session.invalidateAndCancel()
+        pendingSMSLogin?.session.invalidateAndCancel()
+    }
 
 
     public func ensureSession() async throws -> WUSTLoginResult {
@@ -75,6 +79,7 @@ public actor WUSTLoginClient {
 
     private func performAuthServerLogin(password: String, maxSliderAttempts: Int,
                                         diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)?) async throws -> WUSTLoginResult {
+        clearPendingSMSLogin()
         let expectedVersion = version
         let candidate = Self.makeSession(configuration: configuration)
         defer { candidate.invalidateAndCancel() }
@@ -83,6 +88,58 @@ public actor WUSTLoginClient {
         try checkActive(expectedVersion)
         let cookies = candidate.configuration.httpCookieStorage?.cookies ?? []
         return try await validateUndergraduateWebSession(cookies)
+    }
+
+    public func sendLoginSMSCode(
+        to account: String, maxSliderAttempts: Int = 3,
+        diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)? = nil
+    ) async throws -> Int? {
+        _ = try await run(kind: .login) {
+            try await self.performSendLoginSMS(account: account, maxSliderAttempts: maxSliderAttempts, diagnostics: diagnostics)
+        }
+        return pendingSMSLogin?.context.resendAfterSeconds
+    }
+
+    public func loginWithSMSCode(_ code: String) async throws -> WUSTLoginResult {
+        try await run(kind: .login) {
+            try await self.performSMSLogin(code: code)
+        }
+    }
+
+    private func performSendLoginSMS(
+        account: String, maxSliderAttempts: Int,
+        diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)?
+    ) async throws -> WUSTLoginResult {
+        clearPendingSMSLogin()
+        let expectedVersion = version
+        let candidate = Self.makeSession(configuration: configuration)
+        var prepared = false
+        defer { if !prepared { candidate.invalidateAndCancel() } }
+        let context = try await AuthServerSMSLoginService().sendCode(
+            account: account, using: candidate, maxSliderAttempts: maxSliderAttempts, diagnostics: diagnostics
+        )
+        try checkActive(expectedVersion)
+        pendingSMSLogin = (context, candidate)
+        prepared = true
+        return .loginRequired
+    }
+
+    private func performSMSLogin(code: String) async throws -> WUSTLoginResult {
+        guard let pendingSMSLogin else { throw WUSTLoginClientError.verificationNotPending }
+        let expectedVersion = version
+        let result = try await AuthServerSMSLoginService().login(code: code, context: pendingSMSLogin.context, using: pendingSMSLogin.session)
+        try checkActive(expectedVersion)
+        if case .loginNotCompleted(let refreshed) = result {
+            self.pendingSMSLogin = (refreshed, pendingSMSLogin.session)
+            throw AuthServerLoginError.loginNotCompleted
+        }
+        let cookies = pendingSMSLogin.session.configuration.httpCookieStorage?.cookies ?? []
+        return try await validateUndergraduateWebSession(cookies)
+    }
+
+    private func clearPendingSMSLogin() {
+        pendingSMSLogin?.session.invalidateAndCancel()
+        pendingSMSLogin = nil
     }
 
     func adoptUndergraduateWebSession(_ cookies: [HTTPCookie]) async throws -> WUSTLoginResult {
@@ -112,6 +169,7 @@ public actor WUSTLoginClient {
         guard info.studentID == username else { throw WUSTLoginClientError.studentIDMismatch }
 
         version += 1
+        clearPendingSMSLogin()
         session.invalidateAndCancel()
         session = candidate
         accepted = true
@@ -239,6 +297,7 @@ public actor WUSTLoginClient {
         loggingOut = true
         defer { loggingOut = false }
         version += 1
+        clearPendingSMSLogin()
         let task = operation?.task
         operation = nil
         task?.cancel()
@@ -311,6 +370,7 @@ public actor WUSTLoginClient {
 
     private func performLogin(password: String) async throws -> WUSTLoginResult {
         guard !password.isEmpty else { throw WUSTLoginClientError.invalidConfiguration }
+        clearPendingSMSLogin()
         version += 1
         let expectedVersion = version
         session.invalidateAndCancel()
