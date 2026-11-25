@@ -13,6 +13,12 @@ struct WUSTDemo {
             exit(EXIT_FAILURE)
         } catch is CancellationError {
             log("操作已取消。")
+        } catch let error as DemoLoginFile.StoreError {
+            switch error {
+            case .keychain(let status): log("本地账密文件的密钥读取失败（OSStatus \(status)）。")
+            default: log("本地账密文件不可用，请用 --update-login-file 重新保存。")
+            }
+            exit(EXIT_FAILURE)
         } catch let error as AuthServerLoginError {
             log("新版账号登录未完成：\(error)。若学校要求其他验证，可使用网页登录入口。")
             exit(EXIT_FAILURE)
@@ -88,6 +94,22 @@ struct WUSTDemo {
     }
 
     private static func run() async throws {
+        if CommandLine.arguments.contains("--login-file-path") {
+            log(DemoLoginFile.fileURL.path)
+            return
+        }
+        if CommandLine.arguments.contains("--clear-login-file") {
+            try DemoLoginFile.clear()
+            log("已清除 Demo 本地账密文件。")
+            return
+        }
+        if CommandLine.arguments.contains("--update-login-file") {
+            let username = try input("请输入要保存的账号（学号）：")
+            let password = try await DemoPasswordInput.read(savingLocally: true)
+            try DemoLoginFile.save(.init(username: username, password: password))
+            log("已保存 Demo 本地账密文件：\(DemoLoginFile.fileURL.path)")
+            return
+        }
         if CommandLine.arguments.contains("--slider-captcha") {
             try await SliderCaptchaDemo.run()
             return
@@ -96,7 +118,14 @@ struct WUSTDemo {
             try await NoticeDemo.run()
             return
         }
-        let username = try input("请输入账号（学号）：")
+        let savedLogin = DemoLoginFile.exists ? try DemoLoginFile.load() : nil
+        let username: String
+        if let savedLogin {
+            username = savedLogin.username
+            log("已从本地账密文件读取测试账号。")
+        } else {
+            username = try input("请输入账号（学号）：")
+        }
         let client = try makeClient(username: username)
         let choice: String?
         if CommandLine.arguments.contains("--native-login") {
@@ -106,9 +135,19 @@ struct WUSTDemo {
             choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if choice == "4" {
-            let password = try await DemoPasswordInput.read()
+            let password: String
+            if let savedLogin {
+                password = savedLogin.password
+                log("已从本地账密文件读取密码。")
+            } else {
+                password = try await DemoPasswordInput.read(savingLocally: true)
+                try DemoLoginFile.save(.init(username: username, password: password))
+                log("已保存 Demo 本地账密文件：\(DemoLoginFile.fileURL.path)")
+            }
             log("正在通过新版接口登录并自动校验滑块……")
-            let result = try await client.loginWithAuthServer(password: password)
+            let result = try await DemoCaptchaRetry.run(label: "新版自动登录") { diagnostics in
+                try await client.loginWithAuthServer(password: password, maxSliderAttempts: 1, diagnostics: diagnostics)
+            }
             guard describe(result) else { return }
             _ = try await client.fetchStudentInfo()
             log("新版登录与学生信息读取成功，学号与登录账号一致。")

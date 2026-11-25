@@ -29,6 +29,8 @@ public enum SliderCaptchaError: Error, Sendable, Equatable {
     case invalidImage
     case invalidGeometry
     case noReliableMatch
+    /// Consecutive unreliable challenges exhausted the independent image-refresh budget.
+    case challengeRefreshLimitExceeded(Int)
     case encryptionFailed
     case invalidResponse
     case unexpectedStatusCode(Int)

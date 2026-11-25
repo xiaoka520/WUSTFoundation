@@ -66,15 +66,20 @@ public actor WUSTLoginClient {
 
     /// New authserver password flow. Slider verification is performed automatically.
     /// Success requires reading the student card and matching this client's account.
-    public func loginWithAuthServer(password: String) async throws -> WUSTLoginResult {
-        try await run(kind: .login) { try await self.performAuthServerLogin(password: password) }
+    public func loginWithAuthServer(password: String, maxSliderAttempts: Int = 3,
+                                    diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)? = nil) async throws -> WUSTLoginResult {
+        try await run(kind: .login) {
+            try await self.performAuthServerLogin(password: password, maxSliderAttempts: maxSliderAttempts, diagnostics: diagnostics)
+        }
     }
 
-    private func performAuthServerLogin(password: String) async throws -> WUSTLoginResult {
+    private func performAuthServerLogin(password: String, maxSliderAttempts: Int,
+                                        diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)?) async throws -> WUSTLoginResult {
         let expectedVersion = version
         let candidate = Self.makeSession(configuration: configuration)
         defer { candidate.invalidateAndCancel() }
-        try await AuthServerLoginService().login(username: username, password: password, using: candidate)
+        try await AuthServerLoginService().login(username: username, password: password, using: candidate,
+                                                maxSliderAttempts: maxSliderAttempts, diagnostics: diagnostics)
         try checkActive(expectedVersion)
         let cookies = candidate.configuration.httpCookieStorage?.cookies ?? []
         return try await validateUndergraduateWebSession(cookies)

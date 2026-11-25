@@ -17,14 +17,24 @@ public struct AuthServerLoginService: Sendable {
 
     public func login(username: String, password: String,
                       service: URL = URL(string: "https://bkjx.wust.edu.cn/jsxsd/")!,
-                      using session: URLSession) async throws {
+                      using session: URLSession, maxSliderAttempts: Int = 3,
+                      diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)? = nil) async throws {
+        guard (1...5).contains(maxSliderAttempts) else { throw SliderCaptchaError.invalidAttempts }
         guard !username.isEmpty, !password.isEmpty,
               service.scheme == "https", service.host != nil else { throw AuthServerLoginError.invalidInput }
         var components = URLComponents(string: "https://auth.wust.edu.cn/authserver/login")!
         components.queryItems = [URLQueryItem(name: "service", value: service.absoluteString)]
         guard let loginURL = components.url else { throw AuthServerLoginError.invalidInput }
-        let (data, response) = try await session.data(for: URLRequest(url: loginURL))
+        diagnostics?(.phase(.session))
+        diagnostics?(.request(endpoint: "login", cookieCount: session.configuration.httpCookieStorage?.cookies?.count ?? 0))
+        var initialRequest = URLRequest(url: loginURL)
+        AuthServerRequestHeaders.apply(to: &initialRequest, ajax: false)
+        diagnostics?(.requestProfile(name: "Safari-compatible/18.0"))
+        let (data, response) = try await session.data(for: initialRequest)
         let initial = try Self.http(response)
+        diagnostics?(.httpResponse(endpoint: "login", status: initial.statusCode,
+                                   expectedHost: initial.url?.host == loginURL.host,
+                                   cookieCount: session.configuration.httpCookieStorage?.cookies?.count ?? 0))
         if initial.url?.host == service.host { return }
         guard initial.url?.host == loginURL.host,
               data.count < 12_000_000, let html = String(data: data, encoding: .utf8) else {
@@ -32,7 +42,7 @@ public struct AuthServerLoginService: Sendable {
         }
         let submission = try Self.submission(html: html, loginURL: loginURL,
                                              username: username, password: password)
-        _ = try await AuthServerCaptchaService().solveAndVerify(using: session)
+        _ = try await AuthServerCaptchaService(referer: loginURL).solveAndVerify(using: session, maxAttempts: maxSliderAttempts, diagnostics: diagnostics)
         let (_, completedResponse) = try await session.data(
             for: submission, delegate: AuthServerRedirectPolicy(authenticationHost: "auth.wust.edu.cn")
         )
@@ -72,6 +82,7 @@ public struct AuthServerLoginService: Sendable {
         var request = URLRequest(url: loginURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 30
+        AuthServerRequestHeaders.apply(to: &request, ajax: false, referer: loginURL)
         request.setValue("application/x-www-form-urlencoded;charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue(loginURL.absoluteString, forHTTPHeaderField: "Referer")
         request.setValue("https://auth.wust.edu.cn", forHTTPHeaderField: "Origin")

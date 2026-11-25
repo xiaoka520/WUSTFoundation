@@ -56,5 +56,6 @@ let package = Package(
                 .unsafeFlags(["-parse-as-library"])
             ]
         ),
+        .testTarget(name: "WUSTDemoTests", dependencies: ["WUSTDemo", "WUSTFoundation"]),
     ]
 )

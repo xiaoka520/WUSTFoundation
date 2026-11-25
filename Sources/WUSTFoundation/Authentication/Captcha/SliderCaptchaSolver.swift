@@ -8,7 +8,8 @@ import Accelerate
 public struct SliderCaptchaSolver: Sendable {
     public init() {}
 
-    public func solve(_ challenge: SliderCaptcha, canvasLength: Int = 280) throws -> SliderCaptchaSolution {
+    public func solve(_ challenge: SliderCaptcha, canvasLength: Int = 280,
+                      diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)? = nil) throws -> SliderCaptchaSolution {
         guard (100...2048).contains(canvasLength) else { throw SliderCaptchaError.invalidGeometry }
         let data = try challenge.imageData()
         let background = try Raster(data: data.background)
@@ -37,12 +38,18 @@ public struct SliderCaptchaSolver: Sendable {
                 samples.append((x, y + originY, piece.gray(x: x, y: y)))
             }
         }
-        guard samples.count >= 32 else { throw SliderCaptchaError.invalidImage }
+        guard samples.count >= 32 else {
+            diagnostics?(.matchingRejected(reason: "有效采样点不足32"))
+            throw SliderCaptchaError.invalidImage
+        }
         let count = Double(samples.count)
         let mean = samples.reduce(0) { $0 + $1.value } / count
         let values = samples.map { $0.value - mean }
         let variance = values.reduce(0) { $0 + $1 * $1 }
-        guard variance > count else { throw SliderCaptchaError.noReliableMatch }
+        guard variance > count else {
+            diagnostics?(.matchingRejected(reason: "拼图有效纹理不足"))
+            throw SliderCaptchaError.noReliableMatch
+        }
         var scores: [(x: Int, score: Double)] = []
         let sampleIndices = samples.map { $0.y * background.width + $0.x }
         var target = [Double](repeating: 0, count: samples.count)
@@ -75,11 +82,21 @@ public struct SliderCaptchaSolver: Sendable {
                 }
             }
         }
-        guard let best = scores.max(by: { $0.score < $1.score }), best.score.isFinite,
-              best.score >= 0.65 else { throw SliderCaptchaError.noReliableMatch }
+        guard let best = scores.max(by: { $0.score < $1.score }), best.score.isFinite else {
+            diagnostics?(.matchingRejected(reason: "没有有限的匹配分数"))
+            throw SliderCaptchaError.noReliableMatch
+        }
         let alternative = scores.filter { abs($0.x - best.x) > max(8, piece.width / 4) }
             .map(\.score).max() ?? -1
-        guard best.score - alternative >= 0.03 else { throw SliderCaptchaError.noReliableMatch }
+        diagnostics?(.candidates(pixelOffset: best.x, bestScore: best.score, alternativeScore: alternative))
+        guard best.score >= 0.65 else {
+            diagnostics?(.matchingRejected(reason: "最高分低于0.65"))
+            throw SliderCaptchaError.noReliableMatch
+        }
+        guard best.score - alternative >= 0.03 else {
+            diagnostics?(.matchingRejected(reason: "最高分与竞争位置分差不足0.03"))
+            throw SliderCaptchaError.noReliableMatch
+        }
         let moveLength = Double(best.x) * Double(canvasLength) / Double(background.width)
         guard moveLength > 0, moveLength + 40 <= Double(canvasLength) else {
             throw SliderCaptchaError.invalidGeometry

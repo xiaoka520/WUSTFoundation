@@ -74,7 +74,89 @@ struct SliderCaptchaTests {
         try await success.verify(challenge, solution: solution, using: session)
     }
 
-    private static func challenge() throws -> SliderCaptcha {
+    @Test func rejectionDiagnosticsKeepHTTPAndBusinessCodeSeparate() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SliderResponseProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let challenge = try Self.challenge()
+        let solution = try SliderCaptchaSolver().solve(challenge)
+        let recorder = SliderDiagnosticRecorder()
+        let service = AuthServerCaptchaService(baseURL: URL(string: "https://slider.test/rejected/")!)
+        await #expect(throws: SliderCaptchaError.rejected(0)) {
+            try await service.verify(challenge, payload: SliderVerificationPayload(solution: solution),
+                                     using: session, diagnostics: { recorder.record($0) })
+        }
+        let events = recorder.snapshot()
+        #expect(events.contains { if case .httpResponse(_, 200, true, _) = $0 { true } else { false } })
+        #expect(events.contains { if case .result(0) = $0 { true } else { false } })
+        #expect(events.contains { if case .request("common/verifySliderCaptcha.htl", _) = $0 { true } else { false } })
+    }
+
+    @Test func ambiguousMatchReportsTheFailedReliabilityRule() throws {
+        let challenge = try Self.challenge(duplicateTarget: true)
+        let recorder = SliderDiagnosticRecorder()
+        #expect(throws: SliderCaptchaError.noReliableMatch) {
+            try SliderCaptchaSolver().solve(challenge, diagnostics: { recorder.record($0) })
+        }
+        let events = recorder.snapshot()
+        #expect(events.contains {
+            if case .candidates(_, let best, let alternative) = $0 {
+                return best > 0.99 && alternative > 0.99 && abs(best - alternative) < 0.03
+            }
+            return false
+        })
+        #expect(events.contains {
+            if case .matchingRejected("最高分与竞争位置分差不足0.03") = $0 { true } else { false }
+        })
+    }
+
+    @Test func unreliableImagesDoNotConsumeTheVerificationBudget() async throws {
+        let fixture = try Self.retryFixture(rejected: false)
+        defer { fixture.session.invalidateAndCancel(); SliderRefreshProtocol.remove(fixture.host) }
+        let result = try await AuthServerCaptchaService(baseURL: fixture.url)
+            .solveAndVerify(using: fixture.session, maxAttempts: 1)
+        #expect(result.pixelOffset == 90)
+        #expect(SliderRefreshProtocol.counts(fixture.host) == [3, 1])
+    }
+
+    @Test func unreliableImageRefreshesHaveAnIndependentStopLimit() async throws {
+        let fixture = try Self.retryFixture(rejected: false, alwaysAmbiguous: true)
+        defer { fixture.session.invalidateAndCancel(); SliderRefreshProtocol.remove(fixture.host) }
+        await #expect(throws: SliderCaptchaError.challengeRefreshLimitExceeded(10)) {
+            try await AuthServerCaptchaService(baseURL: fixture.url)
+                .solveAndVerify(using: fixture.session, maxAttempts: 3)
+        }
+        #expect(SliderRefreshProtocol.counts(fixture.host) == [10, 0])
+    }
+
+    @Test func serverRejectionStillConsumesOneVerification() async throws {
+        let fixture = try Self.retryFixture(rejected: true)
+        defer { fixture.session.invalidateAndCancel(); SliderRefreshProtocol.remove(fixture.host) }
+        await #expect(throws: SliderCaptchaError.rejected(0)) {
+            try await AuthServerCaptchaService(baseURL: fixture.url)
+                .solveAndVerify(using: fixture.session, maxAttempts: 1)
+        }
+        #expect(SliderRefreshProtocol.counts(fixture.host) == [3, 1])
+    }
+
+    private static func retryFixture(rejected: Bool, alwaysAmbiguous: Bool = false) throws
+        -> (session: URLSession, url: URL, host: String) {
+        func encoded(_ challenge: SliderCaptcha) throws -> Data {
+            try JSONSerialization.data(withJSONObject: ["bigImage": challenge.bigImage,
+                "smallImage": challenge.smallImage, "tagWidth": challenge.tagWidth, "yHeight": challenge.yHeight])
+        }
+        let ambiguous = try encoded(challenge(duplicateTarget: true))
+        let valid = try encoded(challenge())
+        let host = UUID().uuidString.lowercased() + ".slider-refresh.test"
+        SliderRefreshProtocol.register(host, images: alwaysAmbiguous ? [ambiguous] : [ambiguous, ambiguous, valid],
+                                       code: rejected ? 0 : 1)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SliderRefreshProtocol.self]
+        return (URLSession(configuration: configuration), URL(string: "https://\(host)/")!, host)
+    }
+
+    private static func challenge(duplicateTarget: Bool = false) throws -> SliderCaptcha {
         let width = 240, height = 80, pieceWidth = 40, offset = 90
         var background = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
@@ -100,6 +182,15 @@ struct SliderCaptchaTests {
                 piece[destination + 3] = 255
             }
         }
+        if duplicateTarget {
+            for y in 0..<height {
+                for x in 0..<pieceWidth {
+                    for channel in 0..<4 {
+                        background[(y * width + 160 + x) * 4 + channel] = background[(y * width + offset + x) * 4 + channel]
+                    }
+                }
+            }
+        }
         let big = try png(background, width: width, height: height)
         let small = try png(piece, width: pieceWidth, height: height) + Data("0123456789abcdef".utf8)
         return SliderCaptcha(bigImage: big.base64EncodedString(), smallImage: small.base64EncodedString(),
@@ -122,6 +213,21 @@ struct SliderCaptchaTests {
     }
 }
 
+private final class SliderDiagnosticRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [SliderCaptchaDiagnostic] = []
+    func record(_ event: SliderCaptchaDiagnostic) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+    func snapshot() -> [SliderCaptchaDiagnostic] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
+
 private final class SliderResponseProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "slider.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -135,6 +241,56 @@ private final class SliderResponseProtocol: URLProtocol, @unchecked Sendable {
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class SliderRefreshProtocol: URLProtocol, @unchecked Sendable {
+    private struct Scenario { let images: [Data]; let code: Int; var fetches = 0; var posts = 0 }
+    private final class Registry: @unchecked Sendable {
+        let lock = NSLock()
+        var values: [String: Scenario] = [:]
+    }
+    private static let registry = Registry()
+    static func register(_ host: String, images: [Data], code: Int) {
+        registry.lock.lock(); defer { registry.lock.unlock() }
+        registry.values[host] = Scenario(images: images, code: code)
+    }
+    static func remove(_ host: String) {
+        registry.lock.lock(); defer { registry.lock.unlock() }
+        registry.values.removeValue(forKey: host)
+    }
+    static func counts(_ host: String) -> [Int] {
+        registry.lock.lock(); defer { registry.lock.unlock() }
+        guard let value = registry.values[host] else { return [] }
+        return [value.fetches, value.posts]
+    }
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host?.hasSuffix(".slider-refresh.test") == true
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        Self.registry.lock.lock()
+        guard var scenario = Self.registry.values[url.host ?? ""] else {
+            Self.registry.lock.unlock()
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return
+        }
+        let data: Data
+        if url.path.hasSuffix("openSliderCaptcha.htl") {
+            data = scenario.images[min(scenario.fetches, scenario.images.count - 1)]
+            scenario.fetches += 1
+        } else {
+            scenario.posts += 1
+            data = Data("{\"errorCode\":\(scenario.code)}".utf8)
+        }
+        Self.registry.values[url.host ?? ""] = scenario
+        Self.registry.lock.unlock()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
