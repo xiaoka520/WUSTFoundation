@@ -4,7 +4,7 @@ import WUSTFoundation
 
 @main
 struct WUSTDemo {
-    enum DemoError: Error { case missingInput, deviceIDStorageUnavailable }
+    enum DemoError: Error { case missingInput }
 
     static func main() async {
         do { try await run() }
@@ -33,37 +33,8 @@ struct WUSTDemo {
         } catch let error as WUSTLoginClientError {
             log("登录流程未完成：\(error)。")
             exit(EXIT_FAILURE)
-        } catch let error as UnionAuthServiceError {
-            switch error {
-            case .loginFailed(let code):
-                let safeCode = code.range(of: #"\A[A-Z0-9_]{1,32}\z"#, options: .regularExpression) != nil ? code : "UNKNOWN"
-                log("统一认证失败（业务码 \(safeCode)）。")
-            case .smsCodeRejected(let code, _), .smsVerificationRejected(let code, _):
-                log("短信操作被服务器拒绝（业务码 \(code)）。")
-            case .unexpectedStatusCode(let code), .configurationRejected(let code):
-                log("统一认证请求失败（状态码 \(code)）。")
-            default:
-                log("统一认证未完成，请检查凭据或验证状态。")
-            }
-            exit(EXIT_FAILURE)
-        } catch let error as ATrustAuthServiceError {
-            switch error {
-            case .webLoginRequired: log("学校已切换到新版认证页面，请使用网页登录。")
-            case .rejected(let code): log("aTrust 拒绝认证（业务码 \(code)）。")
-            case .unexpectedStatusCode(let code): log("aTrust 请求失败（HTTP \(code)）。")
-            case .requestFailed(_, let status, let code):
-                log("aTrust 请求失败（HTTP \(status)，业务码 \(code.map(String.init) ?? "未知")）。")
-            default: log("aTrust 响应或回调无效。")
-            }
-            exit(EXIT_FAILURE)
         } catch let error as UndergraduateAuthServiceError {
             log("教务会话处理失败：\(error)。")
-            exit(EXIT_FAILURE)
-        } catch let error as DemoCredentialStore.StoreError {
-            switch error {
-            case .keychain(let status): log("Keychain 操作失败（OSStatus \(status)）。")
-            case .invalidData: log("已保存的凭据数据无效，请清除后重新登录。")
-            }
             exit(EXIT_FAILURE)
         } catch let error as TimetablePageCapture.CaptureError {
             log("课表入口采集未完成：\(error)。")
@@ -138,7 +109,7 @@ struct WUSTDemo {
         } else if CommandLine.arguments.contains("--native-login") {
             choice = "4"
         } else {
-            log("输入 1 恢复已保存的登录（默认），2 在学校网页用学号登录，3 清除本账号本地登录，4 使用新版接口自动登录，5 短信登录：")
+            log("输入 1 检查当前会话（默认），2 在学校网页登录，3 清除当前会话，4 使用新版接口自动登录，5 短信登录：")
             choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if choice == "5" {
@@ -199,7 +170,7 @@ struct WUSTDemo {
         }
         if choice == "3" {
             try await client.logout()
-            log("已清除本账号的本地 TGT 和会话；未撤销服务端或其他 App 的登录。")
+            log("已清除当前 client 会话；未退出学校服务端或其他 App。")
             return
         }
         var result: WUSTLoginResult
@@ -207,32 +178,17 @@ struct WUSTDemo {
         if choice == "2" {
             result = try await WebLoginDemo.run(using: client)
         } else {
-            log("正在尝试复用或恢复登录……")
-            do { result = try await client.ensureSession() }
-            catch ATrustAuthServiceError.webLoginRequired { result = .loginRequired }
+            log("正在检查当前教务会话……")
+            result = try await client.ensureSession()
             if case .loginRequired = result { result = try await WebLoginDemo.run(using: client) }
         }
         #else
-        if choice == "2" { throw ATrustAuthServiceError.webLoginRequired }
+        if choice == "2" { throw WUSTLoginClientError.notAuthenticated }
         result = try await client.ensureSession()
         if case .loginRequired = result {
-            throw ATrustAuthServiceError.webLoginRequired
+            throw WUSTLoginClientError.notAuthenticated
         }
         #endif
-        if case .verificationRequired(_, let methods) = result {
-            log("统一认证要求二次验证；可用方式：\(methods.map { $0 == .sms ? "短信" : "微信" }.joined(separator: "、"))")
-            guard methods.contains(.sms) else {
-                log("当前 Demo 未提供微信验证界面。")
-                return
-            }
-            log("输入 1 发送一次短信验证码，其他输入结束：")
-            guard readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return }
-            try await client.sendSMSCode()
-            let code = try input("服务器已确认发送，请输入短信验证码：")
-            let value = try input("请输入密码以继续统一认证：")
-            log("正在校验短信并继续登录……")
-            result = try await client.submitSMSCode(code, password: value)
-        }
         guard describe(result) else { return }
         if CommandLine.arguments.contains("--shuttle") {
             try await CampusShuttleDemo.run(using: client)
@@ -246,31 +202,30 @@ struct WUSTDemo {
     private static func runSessionMenu(client: WUSTLoginClient, username: String) async throws {
         var activeClient = client
         while true {
-            log("输入 1 在全新 client 中恢复，2 复用当前会话，3 清除本地凭据，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，14 查询第二课堂成绩单，其他输入结束：")
+            log("输入 1 使用全新 client 重新登录，2 复用当前会话，3 清除当前会话，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，14 查询第二课堂成绩单，其他输入结束：")
             switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
             case "1":
                 let restored = try makeClient(username: username)
-                guard describe(try await restored.ensureSession()) else { return }
+                #if os(macOS)
+                guard describe(try await WebLoginDemo.run(using: restored)) else { return }
+                #else
+                throw WUSTLoginClientError.notAuthenticated
+                #endif
                 _ = try await restored.fetchStudentInfo()
                 activeClient = restored
-                log("全新 client 恢复与学生信息读取成功；后续查询使用这个新会话。")
+                log("全新 client 登录与学生信息读取成功；后续查询使用这个新会话。")
             case "2":
                 guard describe(try await activeClient.ensureSession()) else { return }
                 _ = try await activeClient.fetchStudentInfo()
                 log("当前教务会话复用及学生信息读取成功。")
             case "3":
                 try await activeClient.logout()
-                log("本账号的本地凭据及当前 client 会话已清除。")
+                log("当前 client 会话已清除。")
                 return
             case "4":
-                guard let credential = await activeClient.currentCredential() else {
-                    log("当前没有可用 TGT，请重新登录后采集。")
-                    continue
-                }
-                log("正在用已有 TGT 建立采集会话，并请求课表入口……")
+                log("正在使用当前教务会话请求课表入口……")
                 let captured = try await TimetablePageCapture.capture(
-                    credential: credential,
-                    deviceID: loadOrCreateATrustDeviceID(),
+                    using: activeClient,
                     choose: chooseTimetableQuery,
                     onSaved: { url in log("已保存原始响应：\(url.path)") }
                 )
@@ -349,7 +304,7 @@ struct WUSTDemo {
                 } catch let error as LibraryError {
                     log(LibraryDemo.errorMessage(for: error))
                 } catch WUSTLoginClientError.notAuthenticated {
-                    log("图书馆查询需要可用的统一认证 TGT。请使用已保存或新登录的凭据。")
+                    log("图书馆查询需要有效的图书馆会话，新版跨系统自动登录尚未接入。")
                     _ = describe(try await activeClient.ensureSession())
                     return
                 }
@@ -359,7 +314,7 @@ struct WUSTDemo {
                 } catch let error as CampusShuttleError {
                     log(CampusShuttleDemo.errorMessage(for: error))
                 } catch WUSTLoginClientError.notAuthenticated {
-                    log("校车查询需要可用的统一认证 TGT。")
+                    log("校车查询需要有效的门户会话，新版跨系统自动登录尚未接入。")
                     return
                 }
             case "14":
@@ -368,7 +323,7 @@ struct WUSTDemo {
                 } catch let error as SecondClassError {
                     log(SecondClassDemo.errorMessage(for: error))
                 } catch WUSTLoginClientError.notAuthenticated {
-                    log("第二课堂查询需要可用的统一认证 TGT。")
+                    log("第二课堂查询需要有效的学工会话，新版跨系统自动登录尚未接入。")
                     return
                 }
             default:
@@ -411,18 +366,13 @@ struct WUSTDemo {
     }
 
     private static func makeClient(username: String) throws -> WUSTLoginClient {
-        try WUSTLoginClient(
-            username: username, deviceID: loadOrCreateATrustDeviceID(),
-            credentialStore: DemoCredentialStore()
-        )
+        try WUSTLoginClient(username: username)
     }
 
     private static func describe(_ result: WUSTLoginResult) -> Bool {
         switch result {
         case .authenticated: log("教务会话已就绪。") ; return true
-        case .loginRequired: log("TGT 不可用，需要重新登录。")
-        case .verificationRequired: log("服务器仍要求二次验证，本次演示停止，不自动重复发送短信。")
-        case .additionalAuthenticationRequired: log("aTrust 要求尚未接入的后续认证，本次演示停止。")
+        case .loginRequired: log("教务会话不可用，需要重新登录。")
         }
         return false
     }
@@ -437,14 +387,4 @@ struct WUSTDemo {
         FileHandle.standardOutput.write(Data((message + "\n").utf8))
     }
 
-    private static func loadOrCreateATrustDeviceID() throws -> String {
-        guard let preferences = UserDefaults(suiteName: "WUSTFoundation.WUSTDemo") else {
-            throw DemoError.deviceIDStorageUnavailable
-        }
-        let key = "ATrustDeviceID"
-        if let saved = preferences.string(forKey: key), !saved.isEmpty { return saved }
-        let value = (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "").lowercased()
-        preferences.set(value, forKey: key)
-        return value
-    }
 }

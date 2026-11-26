@@ -19,7 +19,6 @@ enum SecondClassDemo {
     static func errorMessage(for error: SecondClassError) -> String {
         switch error {
         case .authenticationRequired: return "学工系统应用初始化或成绩查询仍未通过认证。"
-        case .ticketExchangeRejected(let code): return "学工系统 ST 回调未通过认证（HTTP \(code)）。"
         case .unexpectedStatusCode(let code): return "第二课堂请求失败（HTTP \(code)）。"
         case .unexpectedRedirect: return "第二课堂跳转到了非预期地址。"
         case .rejected(let code):

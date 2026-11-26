@@ -1,43 +1,25 @@
 # WUSTFoundation
 
-面向 Apple 平台的武汉科技大学基础接口 Swift Package
+面向武汉科技大学 Apple 平台应用的 Swift Package，提供学校新版登录、教务只读查询、通知正文与 PDF，以及胖乖洗衣机查询。
 
-各功能的运行验收状态见对应文档，代码接入不代表全部场景已验收
-支持 iOS 15+、macOS 15+、visionOS 1+。
+**[开发与接入手册](Documentation/Manual.md)** 是统一文档入口，包含完整架构图、模块职责、函数调用示例、返回模型、错误处理和源码函数索引。
 
-- App 接入与登录状态处理：[登录文档](Documentation/Login.md)
-- 物联网设备处理 [文档](Documentation/LaundryLogin.md)
-- 课表接入与查询流程：[课表接入](Documentation/Timetable.md)
-- 教学周与日期范围：[教学周接入](Documentation/TeachingCalendar.md)
-- 图书馆只读接入：[图书馆接入](Documentation/Library.md)
-- 学校通知、纯文本正文与返回示例：[通知接入](Documentation/Notices.md)
-- 培养方案、纯文本与合并表格：[培养方案接入](Documentation/TrainingPlan.md)
-- 课程成绩筛选、返回字段与示例：[成绩接入](Documentation/Grades.md)
-- 考试安排、分类列表与日期时间：[考试安排接入](Documentation/Exams.md)
-- 毕业学分进度、历史统计及修读明细：[学分完成情况接入](Documentation/CreditProgress.md)
-- 第二课堂成绩单与零要求过滤 [接入文档](Documentation/SecondClass.md)
-- watchOS 后续能力与跨设备凭据方案：[watchOS 规划](Documentation/WatchOSPlan.md)（规划中，尚未声明支持）
-- 交互演示：`swift run WUSTDemo`
-- 本地合成协议回归：`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
+- [项目架构](Documentation/Manual.md#architecture)
+- [登录和会话](Documentation/Manual.md#login)
+- [课表与教学周日期](Documentation/Manual.md#timetable)
+- [成绩](Documentation/Manual.md#grades)、[考试](Documentation/Manual.md#exams)、[学分](Documentation/Manual.md#credits)、[培养方案](Documentation/Manual.md#training)
+- [通知与原版 PDF](Documentation/Manual.md#notices)
+- [图书馆](Documentation/Manual.md#library)、[第二课堂与校车](Documentation/Manual.md#other-services)
+- [胖乖登录与洗衣机倒计时](Documentation/Manual.md#laundry)
+- [完整公开 API](Documentation/Manual.md#public-api)、[内部函数地图](Documentation/Manual.md#internals)
 
-App 负责界面和凭据存储策略；包负责认证协议、会话复用与恢复。Demo 提供按账号保存 TGT 的 Keychain 适配示例。
+Swift tools 6.4；平台声明为 iOS 15+、macOS 15+、visionOS 1+，尚未支持 watchOS。
 
-## TODO
-- [x] 登录闭环
-- [x] 学生信息解析
-- [x] 课表解析
-- [x] 学校新闻解析
-- [ ] 一卡通余额查询
-- [ ] 宿舍照明/空调电费查询
-- [x] 课程成绩查询（筛选、解析、会话接入与 Demo 已写入；待验证）
-- [x] 培养方案解析（说明正文、合并表格、会话接入）
-- [x] 学分完成情况（毕业学分进度、历史统计与修读明细）
-- [x] 考试安排查询（双表解析、日期时间、会话接入与 Demo 已写入，待验证）
-- [x] 第二课堂成绩单（分类学分要求、已获学分、总学分与评价；待真实账号验证）
-- [ ] 研究生支持
-- [ ] watchOS核心功能支持
-- [ ] 学校日历解析
-- [x] 空闲洗衣机获取
-- [x] 使用中洗衣机剩余时间查询（订单分页、预计结束时间和倒计时快照）
-- [ ] 洗衣机解析
-- [ ] 饮水机解析
+```sh
+swift run WUSTDemo
+swift run WUSTLaundryDemo
+```
+
+学校登录使用 `/authserver`，旧登录及 TGT/aTrust 自动换票已移除。新版续期、跨启动恢复和图书馆／门户／学工跨系统自动登录尚待接入；算术图片识别器独立保留。各功能的调用前提和验证范围见手册。
+
+[许可证](LICENSE)

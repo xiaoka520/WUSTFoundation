@@ -13,18 +13,20 @@ enum TimetablePageCapture {
     typealias CaptureError = TimetableCaptureError
 
     static func capture(
-        credential: UnionCredential,
-        deviceID: String,
+        using client: WUSTLoginClient,
         choose: @Sendable (TimetableCaptureForm) throws -> TimetableCaptureSelection,
         onSaved: @Sendable (URL) -> Void
     ) async throws -> TimetableCaptureResult {
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.finishTasksAndInvalidate() }
-        let authentication = try await ATrustAuthService().login(
-            credential: credential, deviceID: deviceID, using: session
-        )
-        guard authentication.isAuthenticated else { throw CaptureError.authenticationRequired }
-        let cookie = try await UndergraduateAuthService().login(credential: credential, using: session)
+        try await client.withUndergraduateSession { cookie, session in
+            try await capture(cookie: cookie, using: session, choose: choose, onSaved: onSaved)
+        }
+    }
+
+    private static func capture(
+        cookie: String, using session: URLSession,
+        choose: @Sendable (TimetableCaptureForm) throws -> TimetableCaptureSelection,
+        onSaved: @Sendable (URL) -> Void
+    ) async throws -> TimetableCaptureResult {
         guard let url = URL(string: "https://bkjx.wust.edu.cn/jsxsd/xskb/xskb_list.do") else {
             throw CaptureError.invalidResponse
         }

@@ -2,7 +2,7 @@ import Foundation
 
 extension WUSTLoginClient {
     public func fetchAcademicTerms() async throws -> AcademicTermList {
-        try await withUndergraduateSession(retryOnAuthenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
+        try await withUndergraduateSession(authenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
             try await TimetableService().fetchAcademicTerms(cookie: cookie, using: session)
         }
     }
@@ -15,7 +15,7 @@ extension WUSTLoginClient {
         guard maxWeek > 0, maxSection > 0 else {
             throw TimetableError.invalidNumberList
         }
-        return try await withUndergraduateSession(retryOnAuthenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
+        return try await withUndergraduateSession(authenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
             try await TimetableService(maxWeek: maxWeek, maxSection: maxSection).fetchTimetable(
                 term: term,
                 cookie: cookie,
@@ -31,7 +31,7 @@ extension WUSTLoginClient {
         } else {
             referenceDate = try AcademicDate.today()
         }
-        return try await withUndergraduateSession(retryOnAuthenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
+        return try await withUndergraduateSession(authenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
             try await TeachingCalendarService().fetchTeachingCalendar(
                 on: referenceDate,
                 cookie: cookie,

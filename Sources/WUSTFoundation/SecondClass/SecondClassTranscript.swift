@@ -30,7 +30,6 @@ public struct SecondClassCreditRequirement: Codable, Hashable, Sendable {
 
 public enum SecondClassError: Error, Equatable, Sendable {
     case authenticationRequired
-    case ticketExchangeRejected(Int)
     case unexpectedStatusCode(Int)
     case unexpectedRedirect
     case rejected(String)
