@@ -2,7 +2,7 @@ import Foundation
 
 extension WUSTLoginClient {
     public func fetchTrainingPlan() async throws -> TrainingPlan {
-        try await withUndergraduateSession(retryOnAuthenticationFailure: Self.isTrainingPlanAuthenticationFailure) { cookie, session in
+        try await withUndergraduateSession(authenticationFailure: Self.isTrainingPlanAuthenticationFailure) { cookie, session in
             try await TrainingPlanService().fetchTrainingPlan(cookie: cookie, using: session)
         }
     }

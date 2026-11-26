@@ -6,9 +6,7 @@
 let transcript = try await client.fetchSecondClassTranscript()
 ```
 
-沿用已登录的 `WUSTLoginClient`。包会复用学工系统会话，会话失效时使用已有 TGT 为学工系统申请 ST，随后重新读取一次。需要新的账号密码或二次验证时，由 App 处理登录。
-
-低层接口为 `SecondClassService.fetchTranscript(credential:using:)`，调用方提供 TGT 与同一个 URLSession。`fetchTranscript(using:)` 使用已经认证的学工系统会话。
+该 client 需要已有的学工系统会话。旧 TGT 换票分支和 `fetchTranscript(credential:using:)` 已移除；新版教务登录暂不能自动建立学工会话。App 已有认证后的学工 URLSession 时，使用 `SecondClassService.fetchTranscript(using:)`。会话失效抛 `SecondClassError.authenticationRequired`，由 App 提供对应站点的登录交互。
 
 ## 返回内容
 

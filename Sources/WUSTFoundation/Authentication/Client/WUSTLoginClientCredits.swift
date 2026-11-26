@@ -2,7 +2,7 @@ import Foundation
 
 extension WUSTLoginClient {
     public func fetchCreditProgress() async throws -> CreditProgress {
-        try await withUndergraduateSession(retryOnAuthenticationFailure: Self.isCreditProgressAuthenticationFailure) { cookie, session in
+        try await withUndergraduateSession(authenticationFailure: Self.isCreditProgressAuthenticationFailure) { cookie, session in
             try await CreditProgressService().fetchCreditProgress(cookie: cookie, using: session)
         }
     }

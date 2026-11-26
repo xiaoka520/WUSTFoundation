@@ -42,7 +42,7 @@ let calendar = try await client.fetchTeachingCalendar(on: date)
 
 传给 App 的日期字符串用 `yyyyMMdd`；请求工厂将其转换成接口要求的 `yyyy-MM-dd`。非法日期（例如 20260230）会抛 `TimetableError.invalidDate`，不会自动滚到下个月。
 
-查询复用 client 的 Cookie 和 URLSession。明确的 `authenticationRequired` 最多触发一次已有凭据恢复和重试；缺少周次标签、未知 HTML、网络错误等不会被当作 TGT 失效。
+查询复用 client 的 Cookie 和 URLSession。明确的 `authenticationRequired` 转为需要重新登录；缺少周次标签、未知 HTML、网络错误等仍作为原错误返回，不自动重新认证。
 
 ## 2. 返回值示例
 

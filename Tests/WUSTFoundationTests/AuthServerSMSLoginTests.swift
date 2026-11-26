@@ -72,7 +72,7 @@ struct AuthServerSMSLoginTests {
         SMSProtocol.reset()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SMSProtocol.self]
-        let client = try WUSTLoginClient(username: "fixture-account", deviceID: "fixture-device", sessionConfiguration: config)
+        let client = try WUSTLoginClient(username: "fixture-account", sessionConfiguration: config)
         await #expect(throws: WUSTLoginClientError.verificationNotPending) {
             try await client.loginWithSMSCode("123456")
         }

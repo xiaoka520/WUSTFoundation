@@ -61,7 +61,7 @@ let schedule = try await client.fetchExamSchedule(query: query)
 
 每次正式查询重新读取表单，再 POST。服务器当前不提供的学期或类别会抛 `invalidQuery`。隐藏字段如 `sxxnxq`、`dqxnxq`、`ckbz` 保持页面值，不伪造考试须知确认状态。
 
-客户端延续已有教务会话，必要时使用已有 TGT 恢复；明确认证失效最多恢复并重试一次。网络错误、页面结构变化和 HTTP 500 不视为凭据失效。需要交互登录时，按已有 `WUSTLoginResult` 流程处理，查询不会自动发送短信。
+客户端延续已有教务会话；明确认证失效时返回需要重新登录，不再进行旧版换票恢复。网络错误、页面结构变化和 HTTP 500 不视为凭据失效。需要交互登录时，按已有 `WUSTLoginResult` 流程处理，查询不会自动发送短信。
 
 ## 返回内容
 

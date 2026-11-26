@@ -1,6 +1,6 @@
 import Foundation
 
-public enum UndergraduateAuthServiceError: Error {
+public enum UndergraduateAuthServiceError: Error, Equatable {
     case invalidURL
     case invalidResponse
     case unexpectedStatusCode(Int)
@@ -15,73 +15,6 @@ public enum UndergraduateAuthServiceError: Error {
 public struct UndergraduateAuthService {
 
     public init() {}
-
-    private func exchangeTicket(ticket: String, using session: URLSession) async throws -> String {
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "bkjx.wust.edu.cn"
-        components.path = "/jsxsd/"
-        components.queryItems = [
-            URLQueryItem(name: "ticket", value: ticket)
-        ]
-
-        guard let ticketURL = components.url else {
-            throw UndergraduateAuthServiceError.invalidURL
-        }
-
-        guard let baseURL = URL(string: "https://bkjx.wust.edu.cn/jsxsd/") else {
-            throw UndergraduateAuthServiceError.invalidURL
-        }
-        var ticketRequest = URLRequest(url: ticketURL)
-        ticketRequest.httpMethod = "GET"
-        var baseRequest = URLRequest(url: baseURL)
-        baseRequest.httpMethod = "GET"
-
-        let (_, ticketResponse) = try await session.data(for: ticketRequest)
-        guard let ticketHttpResponse = ticketResponse as? HTTPURLResponse else {
-            throw UndergraduateAuthServiceError.invalidResponse
-        }
-        guard (200..<300).contains(ticketHttpResponse.statusCode) else {
-            throw UndergraduateAuthServiceError
-                .unexpectedStatusCode(ticketHttpResponse.statusCode)
-        }
-
-        rememberCookies(from: ticketHttpResponse, using: session)
-
-        let (_, baseResponse) = try await session.data(for: baseRequest)
-        guard let baseHttpResponse = baseResponse as? HTTPURLResponse else {
-            throw UndergraduateAuthServiceError.invalidResponse
-        }
-        guard (200..<300).contains(baseHttpResponse.statusCode) else {
-            throw UndergraduateAuthServiceError
-                .unexpectedStatusCode(baseHttpResponse.statusCode)
-        }
-
-        rememberCookies(from: baseHttpResponse, using: session)
-        return try await currentSessionCookie(using: session)
-    }
-
-    @available(*, deprecated, message: "Use WUSTLoginClient for login and SMS continuation, or the credential-based API.")
-    public func login(
-        username: String,
-        password: String,
-        captcha: LoginCaptcha,
-        captchaCode: String,
-        using session: URLSession
-    ) async throws -> String {
-        let service = "https://bkjx.wust.edu.cn/jsxsd/"
-        let ticket = try await UnionAuthService().fetchServiceTicket(
-            username: username,
-            password: password,
-            service: service,
-            captcha: captcha,
-            captchaCode: captchaCode,
-            using: session
-        )
-
-        let cookie = try await exchangeTicket(ticket: ticket, using: session)
-        return cookie
-    }
 
     private func validateSession(using session: URLSession) async throws {
         guard let url = URL(string: "https://bkjx.wust.edu.cn/jsxsd/framework/blankPage.jsp") else {
@@ -119,35 +52,6 @@ public struct UndergraduateAuthService {
         if html.lowercased().contains("script") { throw UndergraduateAuthServiceError.invalidSession }
         throw UndergraduateAuthServiceError.invalidResponse
 
-    }
-
-    public func login(
-        credential: UnionCredential,
-        using session: URLSession
-    ) async throws -> String {
-        let service = "https://bkjx.wust.edu.cn/jsxsd/"
-        let ticket = try await UnionAuthService().fetchServiceTicket(
-            credential: credential,
-            service: service,
-            using: session
-        )
-        return try await exchangeTicket(
-            ticket: ticket,
-            using: session
-        )
-
-    }
-
-    private func rememberCookies(from response: HTTPURLResponse, using session: URLSession) {
-        guard session.configuration.httpShouldSetCookies,
-              let storage = session.configuration.httpCookieStorage,
-              storage.cookieAcceptPolicy != .never,
-              let url = response.url else { return }
-        let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-            if let key = entry.key as? String, let value = entry.value as? String { result[key] = value }
-        }
-        let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
-        storage.setCookies(cookies, for: url, mainDocumentURL: url)
     }
 
     private func readCookie(using session: URLSession) throws -> String {

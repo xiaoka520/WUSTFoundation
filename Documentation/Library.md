@@ -1,6 +1,6 @@
 # 图书馆只读接口接入
 
-登录后的 App 可用 `WUSTLoginClient.fetchLibraryStatistics()` 一次读取五张卡片。图书馆查询复用客户端的 Cookie 容器。数据请求收到登录重定向时，客户端用已有 TGT 换取图书馆会话后重试一次。
+图书馆查询使用已有图书馆 Cookie 和 URLSession。旧 TGT 自动换票已移除；当前新版教务登录尚未接入图书馆自动登录。App 已有图书馆会话时，使用低层 `LibraryService` 的 `cookie:using:` 接口，或 `fetchDashboard(using:)`。保留的 client 查询入口要求其会话中已有图书馆 Cookie，否则抛 `LibraryError.authenticationRequired`。
 
 | 卡片 | 统计字段 | 明细方法 |
 | --- | --- | --- |

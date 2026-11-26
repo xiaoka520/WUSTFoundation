@@ -9,7 +9,7 @@ for category in progress.courseCategories {
 }
 ```
 
-沿用 [登录接入](Login.md) 中的账号客户端。App 已自行管理教务会话时，可使用 `CreditProgressService().fetchCreditProgress(cookie:using:)`。明确的认证失效由账号客户端最多恢复并重试一次。
+沿用 [登录接入](Login.md) 中的账号客户端。App 已自行管理教务会话时，可使用 `CreditProgressService().fetchCreditProgress(cookie:using:)`。明确的认证失效由账号客户端返回需要重新登录，不再使用旧版换票恢复。
 
 | 返回属性 | 对应内容 |
 | --- | --- |

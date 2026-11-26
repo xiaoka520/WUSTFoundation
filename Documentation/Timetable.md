@@ -12,7 +12,7 @@
 let terms = try await client.fetchAcademicTerms()
 ```
 
-此方法检查当前教务会话，必要时使用已有 TGT 恢复，然后读取课表入口提供的学期选项。登录状态无法满足业务访问时抛 `WUSTLoginClientError.notAuthenticated`；App 再调用 `ensureSession()`，根据 `WUSTLoginResult` 展示所需交互，不自动发送短信。
+此方法检查当前教务会话，然后读取课表入口提供的学期选项。会话不可用时需重新登录。登录状态无法满足业务访问时抛 `WUSTLoginClientError.notAuthenticated`；App 再调用 `ensureSession()`，根据 `WUSTLoginResult` 展示所需交互，不自动发送短信。
 
 一个账号保留一个 client。不要为每次刷新新建实例；切换账号前先退出旧 client。client 的 URLSession 不公开给 App。
 
@@ -188,14 +188,14 @@ Timetable(
 
 课表查询共用 client 的认证执行方法，请求完成后会检查账号会话是否已被重置。请求过程中若发生退出或重新登录，旧请求结果不会被当作新会话数据返回。
 
-低层 Service 将 HTTP 401 或最终跳转至已知统一认证/aTrust 域名识别为 `TimetableError.authenticationRequired`。高层 client 对这一错误最多恢复一次 aTrust 和教务会话，再重试整个只读查询；并发失败会优先使用已经完成的会话恢复。恢复期间出现 TGT 失效或额外验证要求时，不自动继续密码或短信登录。
+低层 Service 将 HTTP 401 或最终跳转至已知统一认证/aTrust 域名识别为 `TimetableError.authenticationRequired`。高层 client 对这一错误标记当前会话不可用并抛 `WUSTLoginClientError.notAuthenticated`，由 App 展示登录；不再自动调用旧版换票恢复。
 
 同地址返回的未知 HTML、其他重定向、网络错误、其他 HTTP 错误、解码错误、结构变化和时间格式错误不触发这一恢复重试。不能仅凭出现 script 标签或没有课表就断定凭据失效。
 
 | 错误 | 含义与 App 动作 |
 |---|---|
 | `WUSTLoginClientError.notAuthenticated` | 重新取得登录状态，展示对应的登录或验证交互 |
-| `URLError` | 网络问题；保留 TGT，由用户发起下一次查询 |
+| `URLError` | 网络问题；保留当前会话，由用户发起下一次查询 |
 | `invalidTerm` | 学期已不在最新选项中，重新加载选项 |
 | `selectionNotReflected` | 服务器未按提交条件返回，不展示为目标学期课表 |
 | `unexpectedRedirect` | 非预期跳转，保留为请求异常 |
