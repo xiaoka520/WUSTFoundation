@@ -2,7 +2,27 @@ import Foundation
 
 struct LibraryRequestFactory {
     private let baseURL = "https://libsys.wust.edu.cn"
+    private let service = "https://libsys.wust.edu.cn:443/meta-local/opac/cas/rosetta"
     private let statisticsPath = "/meta-local/opac/users/stats"
+
+    func libraryServiceURL() -> String { service }
+
+    func makeTicketExchangeRequest(ticket: String) throws -> URLRequest {
+        var components = URLComponents(string: service)
+        components?.queryItems = [URLQueryItem(name: "ticket", value: ticket)]
+        guard let url = components?.url else { throw LibraryError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        return request
+    }
+
+    func makeIndexRequest() throws -> URLRequest {
+        var request = URLRequest(url: try url(path: "/meta-local/opac/cas/rosetta"))
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        return request
+    }
 
     func statisticsURL() throws -> URL { try url(path: statisticsPath) }
 

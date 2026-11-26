@@ -2,8 +2,8 @@ import Foundation
 
 extension WUSTLoginClient {
     public func fetchCampusShuttleSchedule() async throws -> CampusShuttleSchedule {
-        try await withAuthenticatedSession { session in
-            try await CampusShuttleService().fetchSchedule(using: session)
+        try await withUnionCredentialAndSession { credential, session in
+            try await CampusShuttleService().fetchSchedule(credential: credential, using: session)
         }
     }
 }

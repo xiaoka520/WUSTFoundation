@@ -2,8 +2,9 @@ import Foundation
 
 extension WUSTLoginClient {
     public func fetchLibraryDashboard(pageSize: Int = 100) async throws -> LibraryDashboard {
-        try await withAuthenticatedSession { session in
+        try await withUnionCredentialAndSession { credential, session in
             try await LibraryService(pageSize: pageSize).fetchDashboard(
+                credential: credential,
                 using: session
             )
         }
@@ -62,9 +63,9 @@ extension WUSTLoginClient {
     private func withLibraryQuery<Value: Sendable>(
         _ query: @Sendable (LibraryService, String, URLSession) async throws -> Value
     ) async throws -> Value {
-        try await withAuthenticatedSession { session in
+        try await withUnionCredentialAndSession { credential, session in
             let service = LibraryService()
-            return try await service.withLibraryCookie(using: session) { cookie in
+            return try await service.withLibraryCookie(credential: credential, using: session) { cookie in
                 try await query(service, cookie, session)
             }
         }

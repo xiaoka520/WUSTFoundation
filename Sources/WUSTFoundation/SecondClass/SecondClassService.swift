@@ -6,6 +6,31 @@ public struct SecondClassService: Sendable {
 
     public init() {}
 
+    public func fetchTranscript(
+        credential: UnionCredential, using session: URLSession
+    ) async throws -> SecondClassTranscript {
+        do {
+            return try await fetchTranscript(using: session)
+        } catch SecondClassError.authenticationRequired {
+            let ticket = try await UnionAuthService().fetchServiceTicket(
+                credential: credential, service: Self.entryURL.absoluteString, using: session
+            )
+            var components = URLComponents(url: Self.entryURL, resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "ticket", value: ticket)]
+            let request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData)
+            let (_, response) = try await session.data(for: request, delegate: SecondClassRedirectDelegate())
+            guard let http = response as? HTTPURLResponse, let url = http.url else {
+                throw SecondClassError.invalidResponse
+            }
+            guard Self.isStudentAffairsURL(url) else { throw SecondClassError.unexpectedRedirect }
+            if (300..<400).contains(http.statusCode) || http.statusCode == 401 {
+                throw SecondClassError.ticketExchangeRejected(http.statusCode)
+            }
+            guard http.statusCode == 200 else { throw SecondClassError.unexpectedStatusCode(http.statusCode) }
+            return try await fetchTranscript(using: session)
+        }
+    }
+
     public func fetchTranscript(using session: URLSession) async throws -> SecondClassTranscript {
         try await initializeApplication(using: session)
         let grades: SecondClassGrades = try await fetch("getCj.do", using: session)
@@ -57,7 +82,7 @@ public struct SecondClassService: Sendable {
 
     private func fetchData(_ request: URLRequest, using session: URLSession) async throws -> Data {
         let (data, response) = try await session.data(
-            for: request, delegate: SecondClassRedirectDelegate()
+            for: request, delegate: SecondClassRedirectDelegate(followsRedirects: false)
         )
         guard let http = response as? HTTPURLResponse, let finalURL = http.url else {
             throw SecondClassError.invalidResponse
@@ -79,11 +104,19 @@ public struct SecondClassService: Sendable {
 }
 
 private final class SecondClassRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    private let followsRedirects: Bool
+
+    init(followsRedirects: Bool = true) { self.followsRedirects = followsRedirects }
+
     func urlSession(
         _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
     ) {
-        completionHandler(nil)
+        guard followsRedirects, let url = request.url, SecondClassService.isStudentAffairsURL(url) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }
 

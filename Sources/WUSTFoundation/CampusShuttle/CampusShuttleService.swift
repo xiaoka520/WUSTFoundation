@@ -3,10 +3,74 @@ import Foundation
 
 struct CampusShuttleService: Sendable {
     private static let portalURL = URL(string: "https://portal.wust.edu.cn/")!
+    private static let callbackURL = portalURL.appendingPathComponent("shiro-cas")
     private static let cardPath = "api/upp/contentDisplay/queryAppointCard/e05973ba27214e7a97234733848f05d5"
 
-    func fetchSchedule(
-        using session: URLSession, authorization: String? = nil
+    func fetchSchedule(credential: UnionCredential, using session: URLSession) async throws -> CampusShuttleSchedule {
+        do {
+            return try await fetchSchedule(using: session, authorization: nil)
+        } catch CampusShuttleError.authenticationRequired {
+            let authorization = try await exchangeTicket(credential: credential, using: session)
+            return try await fetchSchedule(using: session, authorization: authorization)
+        }
+    }
+
+    private func exchangeTicket(credential: UnionCredential, using session: URLSession) async throws -> String? {
+        let service = try await preparePortalLogin(using: session)
+        let ticket = try await UnionAuthService().fetchServiceTicket(
+            credential: credential, service: service, using: session
+        )
+        var components = URLComponents(url: Self.callbackURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "ticket", value: ticket)]
+        let (_, response) = try await session.data(
+            for: URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData),
+            delegate: CampusShuttleRedirectDelegate()
+        )
+        guard let http = response as? HTTPURLResponse, let url = http.url,
+              Self.isPortalURL(url) else { throw CampusShuttleError.invalidResponse }
+
+        if (300..<400).contains(http.statusCode) {
+            guard let location = http.value(forHTTPHeaderField: "Location"),
+                  let redirect = URL(string: location, relativeTo: url)?.absoluteURL,
+                  Self.isPortalURL(redirect),
+                  let authorization = Self.callbackAuthorization(from: redirect) else {
+                throw CampusShuttleError.authenticationRequired
+            }
+            return authorization
+        }
+        guard http.statusCode == 200 else {
+            throw CampusShuttleError.unexpectedStatusCode(http.statusCode)
+        }
+        return Self.callbackAuthorization(from: url)
+    }
+
+    private func preparePortalLogin(using session: URLSession) async throws -> String {
+        var components = URLComponents(
+            url: Self.portalURL.appendingPathComponent("auth"), resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "service", value: CampusShuttle.scheduleURL.absoluteString)]
+        let request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData)
+        let (_, response) = try await session.data(
+            for: request, delegate: CampusShuttleRedirectDelegate(followsRedirects: false)
+        )
+        guard let http = response as? HTTPURLResponse else { throw CampusShuttleError.invalidResponse }
+        guard (300..<400).contains(http.statusCode) else {
+            throw CampusShuttleError.unexpectedStatusCode(http.statusCode)
+        }
+        guard let location = http.value(forHTTPHeaderField: "Location"),
+              let redirect = URLComponents(string: location),
+              redirect.scheme == "https", redirect.host == "auth.wust.edu.cn",
+              (redirect.port ?? 443) == 443, redirect.path == "/lyuapServer/login",
+              redirect.user == nil, redirect.password == nil,
+              let service = redirect.queryItems?.first(where: { $0.name == "service" })?.value,
+              service == Self.callbackURL.absoluteString else {
+            throw CampusShuttleError.invalidResponse
+        }
+        return service
+    }
+
+    private func fetchSchedule(
+        using session: URLSession, authorization: String?
     ) async throws -> CampusShuttleSchedule {
         var login = makeRequest(path: "tryLoginUserInfo", method: "POST", using: session)
         login.setValue("ly-upp", forHTTPHeaderField: "gatewayAppId")
@@ -56,7 +120,7 @@ struct CampusShuttleService: Sendable {
     }
 
     private func fetch<Value: Decodable>(_ request: URLRequest, using session: URLSession) async throws -> Value {
-        let (data, response) = try await session.data(for: request, delegate: CampusShuttleRedirectDelegate())
+        let (data, response) = try await session.data(for: request, delegate: CampusShuttleRedirectDelegate(followsRedirects: false))
         guard let http = response as? HTTPURLResponse, let url = http.url,
               Self.isPortalURL(url) else { throw CampusShuttleError.invalidResponse }
         if http.statusCode == 401 || (300..<400).contains(http.statusCode) {
@@ -79,14 +143,39 @@ struct CampusShuttleService: Sendable {
             url.user == nil && url.password == nil
     }
 
+    fileprivate static func callbackAuthorization(from url: URL) -> String? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        let fragmentQuery = components.percentEncodedFragment?.split(separator: "?", maxSplits: 1)
+        let fragmentItems: [URLQueryItem]
+        if let fragmentQuery, fragmentQuery.count == 2 {
+            var fragment = URLComponents()
+            fragment.percentEncodedQuery = String(fragmentQuery[1])
+            fragmentItems = fragment.queryItems ?? []
+        } else {
+            fragmentItems = []
+        }
+        return (fragmentItems + (components.queryItems ?? []))
+            .first { ["Authorization", "tokenId"].contains($0.name) && $0.value?.isEmpty == false }?.value
+    }
 }
 
 private final class CampusShuttleRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    private let followsRedirects: Bool
+
+    init(followsRedirects: Bool = true) {
+        self.followsRedirects = followsRedirects
+    }
+
     func urlSession(
         _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
     ) {
-        completionHandler(nil)
+        guard followsRedirects, let url = request.url, CampusShuttleService.isPortalURL(url),
+              CampusShuttleService.callbackAuthorization(from: url) == nil else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }
 

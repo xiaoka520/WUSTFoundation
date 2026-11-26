@@ -8,9 +8,10 @@ public struct LibraryService: Sendable {
     }
 
     public func fetchDashboard(
+        credential: UnionCredential,
         using session: URLSession
     ) async throws -> LibraryDashboard {
-        try await withLibraryCookie(using: session) { cookie in
+        try await withLibraryCookie(credential: credential, using: session) { cookie in
             let statistics = try await fetchStatistics(cookie: cookie, using: session)
             let currentLoans = try await fetchCurrentLoans(cookie: cookie, using: session)
             let overdueSoon = try await fetchOverdueSoon(cookie: cookie, using: session)
@@ -93,11 +94,28 @@ public struct LibraryService: Sendable {
     }
 
     func withLibraryCookie<Value: Sendable>(
+        credential: UnionCredential,
         using session: URLSession,
         perform query: @Sendable (String) async throws -> Value
     ) async throws -> Value {
         let factory = LibraryRequestFactory()
         let url = try factory.statisticsURL()
+        if let cookie = readCookie(for: url, using: session) {
+            do {
+                return try await query(cookie)
+            } catch LibraryError.authenticationRequired {
+            }
+        }
+
+        let ticket = try await UnionAuthService().fetchServiceTicket(
+            credential: credential,
+            service: factory.libraryServiceURL(),
+            using: session
+        )
+        let ticketRequest = try factory.makeTicketExchangeRequest(ticket: ticket)
+        _ = try await LibraryPageLoader().fetch(ticketRequest, using: session, followsRedirects: true)
+        let indexRequest = try factory.makeIndexRequest()
+        _ = try await LibraryPageLoader().fetch(indexRequest, using: session, followsRedirects: true)
         guard let cookie = readCookie(for: url, using: session) else {
             throw LibraryError.authenticationRequired
         }
