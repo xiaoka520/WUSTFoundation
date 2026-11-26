@@ -84,7 +84,6 @@ import WUSTFoundation
 ```mermaid
 flowchart TB
     App[宿主 App：UI、缓存、安全存储、刷新调度]
-    Demo[WUSTDemo / WUSTLaundryDemo]
     Client[WUSTLoginClient actor]
     Login[AuthServerLoginService / AuthServerSMSLoginService]
     Web[UndergraduateWebLogin]
@@ -99,8 +98,6 @@ flowchart TB
     Parsers[HTML / JSON / 表单 / 日期解析]
     Models[Sendable 业务模型，部分支持 Codable]
     Net[URLSession 与站点 Cookie / Token]
-    Tool[本机 Tools/SliderLogViewer：读取数值轨迹文件]
-    Tests[Tests：合成协议、模型和并发回归]
     Soup[SwiftSoup：HTML 解析依赖]
 
     App --> Client
@@ -110,12 +107,6 @@ flowchart TB
     App --> LaundryQuery
     App --> Monitor
     App --> OCR
-    Demo --> Client
-    Demo --> Web
-    Demo --> Notice
-    Demo --> LaundryAuth
-    Demo --> LaundryQuery
-    Demo --> Monitor
     Client --> Login
     Login --> Captcha
     Web --> Client
@@ -133,10 +124,6 @@ flowchart TB
     Notice --> Parsers
     LaundryQuery --> Models
     Parsers --> Models
-    Demo -.诊断文件.-> Tool
-    Tests -.回归.-> Client
-    Tests -.回归.-> Parsers
-    Tests -.回归.-> Monitor
     Parsers --> Soup
 ```
 
