@@ -107,7 +107,7 @@ struct WUSTDemo {
             return
         }
         if CommandLine.arguments.contains("--update-login-file") {
-            let username = try input("请输入要保存的账号（学号）：")
+            let username = try input("请输入要保存的登录账号：")
             let password = try await DemoPasswordInput.read(savingLocally: true)
             try DemoLoginFile.save(.init(username: username, password: password))
             log("已保存 Demo 本地账密文件：\(DemoLoginFile.fileURL.path)")
@@ -127,7 +127,7 @@ struct WUSTDemo {
             username = savedLogin.username
             log("已从本地账密文件读取测试账号。")
         } else {
-            username = try input("请输入账号（学号）：")
+            username = try input("请输入登录账号：")
         }
         let client = try makeClient(username: username)
         let choice: String?
@@ -156,7 +156,7 @@ struct WUSTDemo {
             #endif
         }
         if choice == "5" {
-            log("请输入接收短信的绑定手机号或学号，回车使用当前学号。提交后会校验滑块并申请一次短信：")
+            log("请输入接收短信的绑定手机号或学号，回车使用当前账号。提交后会校验滑块并申请一次短信：")
             guard let entered = readLine() else { throw DemoError.missingInput }
             let account = entered.trimmingCharacters(in: .whitespacesAndNewlines)
             let diagnostics = DemoCaptchaDiagnostics()
@@ -186,8 +186,8 @@ struct WUSTDemo {
             }
             guard describe(result) else { return }
             _ = try await client.fetchStudentInfo()
-            outcome = "短信登录及学号校验完成"
-            log("短信登录及学生信息读取成功，学号与当前账号一致。")
+            outcome = "短信登录及学生信息读取完成"
+            log("短信登录及学生信息读取成功。")
             try await runSessionMenu(client: client, username: username)
             return
         }
@@ -207,7 +207,7 @@ struct WUSTDemo {
             }
             guard describe(result) else { return }
             _ = try await client.fetchStudentInfo()
-            log("新版登录与学生信息读取成功，学号与登录账号一致。")
+            log("新版登录与学生信息读取成功。")
             try await runSessionMenu(client: client, username: username)
             return
         }
@@ -238,7 +238,7 @@ struct WUSTDemo {
             return
         }
         _ = try await client.fetchStudentInfo()
-        log("学生信息读取成功，学号与登录账号一致。")
+        log("学生信息读取成功。")
         try await runSessionMenu(client: client, username: username)
     }
 

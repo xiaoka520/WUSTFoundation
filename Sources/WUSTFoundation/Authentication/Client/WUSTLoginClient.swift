@@ -169,9 +169,8 @@ public actor WUSTLoginClient {
 
         let cookie = try await UndergraduateAuthService().currentSessionCookie(using: candidate)
         try checkActive(expectedVersion)
-        let info = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: candidate)
+        _ = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: candidate)
         try checkActive(expectedVersion)
-        guard info.studentID == username else { throw WUSTLoginClientError.studentIDMismatch }
 
         version += 1
         clearPendingManualLogin()
@@ -190,10 +189,6 @@ public actor WUSTLoginClient {
             try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: session)
         }
         try checkActive(expectedVersion)
-        guard info.studentID == username else {
-            try await logout()
-            throw WUSTLoginClientError.studentIDMismatch
-        }
         return info
     }
 

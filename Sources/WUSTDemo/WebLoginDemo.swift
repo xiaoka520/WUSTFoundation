@@ -67,7 +67,7 @@ final class WebLoginDemo: NSObject, NSWindowDelegate {
 
     @objc private func checkLogin() {
         confirmButton.isEnabled = false
-        status.stringValue = "正在核对教务会话和学号……"
+        status.stringValue = "正在检查教务会话……"
         Task {
             do {
                 let result = try await UndergraduateWebLogin.complete(in: webView, using: client)
@@ -75,9 +75,6 @@ final class WebLoginDemo: NSObject, NSWindowDelegate {
                 continuation = nil
                 window.close()
                 pending?.resume(returning: result)
-            } catch WUSTLoginClientError.studentIDMismatch {
-                status.stringValue = "网页学号与终端输入不一致。请关闭窗口后重新登录。"
-                confirmButton.isEnabled = true
             } catch WUSTLoginClientError.notAuthenticated {
                 status.stringValue = "请在学校页面完成登录，进入教务系统后再检查。"
                 confirmButton.isEnabled = true

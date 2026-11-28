@@ -58,10 +58,10 @@ final class LoginTestURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-func testClient() throws -> WUSTLoginClient {
+func testClient(username: String = "test-account") throws -> WUSTLoginClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [LoginTestURLProtocol.self]
-    return try WUSTLoginClient(username: "test-account", sessionConfiguration: config)
+    return try WUSTLoginClient(username: username, sessionConfiguration: config)
 }
 
 func testUndergraduateCookie() throws -> HTTPCookie {

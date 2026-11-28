@@ -20,13 +20,13 @@ struct WUSTLoginClientTests {
         #expect(LoginTestServer.shared.requests().allSatisfy { $0.url?.host == "bkjx.wust.edu.cn" })
     }
 
-    @Test func anotherAccountIsNotAdopted() async throws {
-        LoginTestServer.shared.update { $0.studentID = "other-account" }
-        let client = try testClient()
-        await #expect(throws: WUSTLoginClientError.studentIDMismatch) {
-            try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
-        }
-        guard case .loginRequired = try await client.ensureSession() else { Issue.record("Wrong account adopted"); return }
+    @Test func phoneUsernameAcceptsAuthenticatedStudentSession() async throws {
+        let client = try testClient(username: "13800000000")
+        #expect(isAuthenticated(try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])))
+        #expect(try await client.fetchStudentInfo().studentID == "test-account")
+        #expect(isAuthenticated(try await client.ensureSession()))
+        // A valid adopted session is reused without another auth request or SMS send.
+        #expect(LoginTestServer.shared.requests().allSatisfy { $0.url?.host == "bkjx.wust.edu.cn" && $0.httpMethod == "GET" })
     }
 
     @Test func offlineDoesNotDiscardAnExistingSession() async throws {
@@ -82,12 +82,12 @@ struct WUSTLoginClientTests {
         guard case .loginRequired = try await client.ensureSession() else { Issue.record("Old task revived session"); return }
     }
 
-    @Test func accountMismatchDuringReadClearsSession() async throws {
+    @Test func studentInfoReadReturnsServerIdentityAndKeepsSession() async throws {
         let client = try testClient()
         _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
         LoginTestServer.shared.update { $0.studentID = "another-account" }
-        await #expect(throws: WUSTLoginClientError.studentIDMismatch) { try await client.fetchStudentInfo() }
-        guard case .loginRequired = try await client.ensureSession() else { Issue.record("Wrong account session retained"); return }
+        #expect(try await client.fetchStudentInfo().studentID == "another-account")
+        #expect(isAuthenticated(try await client.ensureSession()))
     }
 
     @Test func authenticationFailureRequiresInteractionWithoutRetryingOldEndpoints() async throws {

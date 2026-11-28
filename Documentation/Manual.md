@@ -152,7 +152,7 @@ flowchart TB
    - **中层网络（Service）**：接收已认证的 `session` 或 `cookie` 发送具体网络请求。
    - **底层纯解析（Parser）**：无网络副作用，接收 HTML/JSON 返回结构化强类型 Model，易于离线单测。
 4. **服务边界分明**：
-   - **教务系统**：以学号为主键，由 `WUSTLoginClient` 统一托管。
+   - **教务系统**：由 `WUSTLoginClient` 统一托管账号登录和教务会话。
    - **学校通知**：完全公开免登录，直接使用 `NoticeService` 即可。
    - **胖乖洗衣**：第三方商业系统，通过独立手机号和 Token 鉴权，不与教务混用。
 
@@ -167,7 +167,7 @@ flowchart TB
 每个登录账号应对应一个 `WUSTLoginClient` 实例：
 
 ```swift
-// username 必须为真实学号（用于登录后核验身份一致性）
+// username 为官网支持的登录账号，可填写学号或手机号
 let client = try WUSTLoginClient(username: "202100010001")
 ```
 
@@ -206,7 +206,7 @@ do {
 1. SDK 访问 `/authserver/login` 获取动态表单隐藏字段（如 `execution`、盐值）。
 2. 请求滑块挑战，本地执行像素对齐与仿生轨迹生成（1.4s 拟人曲线）。
 3. 校验通过后提交加密凭据，并顺延跟进重定向。
-4. 请求教务主页读取学籍信息；**仅当学籍中的学号与初始化 `username` 完全吻合时**，才正式确认登录成功。
+4. 检查教务会话并读取学生信息页面，确认页面可访问和解析后返回登录成功。学生身份以学校返回的数据为准。
 
 ---
 
@@ -609,7 +609,7 @@ do {
 |---|---|---|
 | `WUSTLoginClientError.notAuthenticated` | 当前请求缺少有效 Session 或服务端 Session 已失效 | 弹窗展示登录视图引导用户重新登录 |
 | `WUSTLoginClientError.operationInProgress` | 同一 Client 正在执行登录/短信流程 | 禁用登录按钮多次重复点击 |
-| `WUSTLoginClientError.studentIDMismatch` | 登录返回的学号与初始 Client 学号不一致 | 提示用户不可在已有账号 Client 中跨人登录 |
+| `WUSTLoginClientError.studentIDMismatch` | 兼容旧调用保留，当前客户端不再抛出 | 无需为新版登录处理学号比对 |
 | `AuthServerLoginError` | 表单参数解析异常、账号密码错误或短信校验失败 | 提示用户核对凭据输入 |
 | `SliderCaptchaError` | 滑块识别置信度不足或被服务端风控拦截 | 适当重试，或走 `UndergraduateWebLogin` 网页备选链路 |
 | `LaundryAuthError.loginRequired` | 胖乖 Token 过期失效 | 引导用户重新输入手机号获取短信验证码 |

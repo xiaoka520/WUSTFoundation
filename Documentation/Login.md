@@ -5,10 +5,10 @@
 ## 创建 client
 
 ```swift
-let client = try WUSTLoginClient(username: studentID)
+let client = try WUSTLoginClient(username: loginAccount)
 ```
 
-每个账号保留一个 client。`username` 用于核对学生信息中的学号。初始化只建立独立的临时 URLSession，不发送请求。App 可以通过 `sessionConfiguration:` 提供超时或 URLProtocol 配置；包使用隔离的内存 Cookie 容器，不继承其他 client 的登录。
+每个账号保留一个 client。`username` 是提交密码登录时使用的账号，可填写官网支持的学号或手机号。登录身份由学校认证结果确定。初始化只建立独立的临时 URLSession，不发送请求。App 可以通过 `sessionConfiguration:` 提供超时或 URLProtocol 配置；包使用隔离的内存 Cookie 容器，不继承其他 client 的登录。
 
 已删除旧初始化参数 `deviceID`、`credential`、`credentialStore`、`maxCaptchaAttempts` 和 `captchaSolver`。`UnionCredentialStore`、`currentCredential()`、旧 `login(password:)`、`sendSMSCode()`、`submitSMSCode(_:password:)` 也已删除，调用方需要迁移到以下新版入口。
 
@@ -23,7 +23,7 @@ let result = try await client.loginWithAuthServer(
 
 该入口读取实际表单的动态令牌与密码加密参数，在同一临时会话完成滑块验证并提交密码。`maxSliderAttempts` 允许 1～5，统计实际服务端校验次数；定位不可靠的图片立即换图，不消耗校验次数，每轮另有十张的连续弃图上限。
 
-滑块通过不代表登录完成。包还会检查教务会话、读取学生信息并匹配初始化时的学号，通过后才替换当前 client 会话。失败不会覆盖之前的有效教务会话。
+滑块通过不代表登录完成。包还会检查教务会话、确认学生信息页面可读取和解析，通过后才替换当前 client 会话。失败不会覆盖之前的有效教务会话。
 
 密码由调用方提供，库不保存密码，不自动重试账号密码登录。App 自行决定密码输入与安全存储策略。
 
@@ -119,7 +119,7 @@ let result = try await client.loginWithSMSCode(smsCode)
 
 提交短信码使用同一会话、`cllt=dynamicLogin` 和实际表单参数。服务器返回登录表单时，client 保留更新后的执行令牌，App 可让用户更正短信码后再次提交。重新申请短信、开始密码登录或退出时，待提交的短信会话会清理。短信码不写入日志或持久存储。
 
-只有教务会话和学生信息学号均验证成功，方法才返回 `.authenticated`。手机号属于其他账号时不会将其会话接入本 client。
+教务会话有效且学生信息页面可读取和解析后，方法返回 `.authenticated`。短信接收账号可以与初始化的登录账号使用不同形式，例如手机号和学号；返回的学生信息以学校会话为准。
 
 短信登录协议已核对官网；自动化测试使用合成响应。真实短信收取及完整短信登录仍待账号运行确认，自动滑块的通过率不能由单测推断。
 
@@ -134,7 +134,7 @@ webView.load(URLRequest(url: UndergraduateWebLogin.url))
 let result = try await UndergraduateWebLogin.complete(in: webView, using: client)
 ```
 
-上述 WebKit API 在 MainActor 使用。`makeWebView()` 使用临时网站数据存储。完成入口先确认当前是教务 HTTPS 页面，再获取 Cookie、核对教务会话和学号，成功后才能调用业务查询。
+上述 WebKit API 在 MainActor 使用。`makeWebView()` 使用临时网站数据存储。完成入口先确认当前是教务 HTTPS 页面，再获取 Cookie、检查教务会话及学生信息页面，成功后才能调用业务查询。
 
 ## 登录结果和业务查询
 
@@ -163,6 +163,8 @@ case .loginRequired:
 
 ## 续期、持久化和其他站点
 
+手机号或学号只是首次认证时的登录标识，不应作为每次业务请求或换票的必填凭据。CAS 的会话复用依赖首次认证后建立的统一认证会话：在服务器仍接受该会话时，才能静默申请业务票据。当前 client 接管会话时仅保留教务域 Cookie，尚未保留统一认证域 Cookie，因此不能把当前实现描述成已有后台静默换票；使用手机号也不会自动触发发短信。学校若要求重新认证或新的验证，应由 App 提示用户完成，不能承诺永久免验证码。
+
 当前登录只接入教务 Cookie。包尚未提供新版统一认证会话的保留、静默换票、导出导入或跨启动恢复，也没有后台定时保活。Cookie 有效时可以继续查询，失效后需重新登录；不能把本地时间或 HTTP 200 当作有效凭据证明。
 
 图书馆、门户校车和学工第二课堂的查询与解析代码保留，旧 TGT 自动建会话分支已移除。这些站点需要各自有效的会话；新版教务登录不等于其他站点也登录。默认新 client 尚不能自动建立这些跨系统会话。App 已有对应站点的 URLSession/Cookie 时，可以使用 `LibraryService` 和 `SecondClassService` 的低层只读接口。新版跨系统 SSO 接入需要另行验证。
@@ -188,7 +190,7 @@ try await client.logout()
 | `.smsCodeRejected(code)` | 学校未确认发送短信；按安全业务码提示，不自动重发 |
 | `SliderCaptchaError` | 识别、校验或重试额度未完成；可提供官方网页登录 |
 | `WUSTLoginClientError.notAuthenticated` | 展示登录入口 |
-| `.studentIDMismatch` | 账号不一致；不得展示这份学生数据 |
+| `.studentIDMismatch` | 为兼容旧调用保留，当前客户端已取消学号比对，不再抛出此错误 |
 | `URLError` | 网络问题，保留可用状态并由用户重试 |
 
 不要打印任意完整错误、请求 URL、表单或 HTML，其中可能含票据、Cookie、个人信息。日志只记录错误类别、安全状态码和不含身份信息的数值。
