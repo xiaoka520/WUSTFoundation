@@ -8,6 +8,10 @@ enum TimetableDemo {
     static func run(using client: WUSTLoginClient) async throws {
         log("正在通过当前登录会话读取学期列表……")
         let terms = try await client.fetchAcademicTerms()
+        guard !terms.terms.isEmpty else {
+            log("没有入学年份及之后的可选学期。")
+            return
+        }
         let term = try chooseTerm(from: terms)
 
         log("正在获取并解析 \(term.name) 的整学期课表……")
@@ -92,7 +96,7 @@ enum TimetableDemo {
     }
 
     private static func chooseTerm(from list: AcademicTermList) throws -> AcademicTerm {
-        log("服务器提供 \(list.terms.count) 个学期选项，页面选中学期：\(list.selectedTermID ?? "未明确")。")
+        log("按入学年份筛选后有 \(list.terms.count) 个学期选项，当前选中学期：\(list.selectedTermID ?? "未明确")。")
         while true {
             log("输入学期 ID；回车使用页面选中学期，输入 ? 查看全部选项：")
             let input = try readInput()

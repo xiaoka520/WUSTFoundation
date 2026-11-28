@@ -3,7 +3,10 @@ import Foundation
 extension WUSTLoginClient {
     public func fetchAcademicTerms() async throws -> AcademicTermList {
         try await withUndergraduateSession(authenticationFailure: Self.isTimetableAuthenticationFailure) { cookie, session in
-            try await TimetableService().fetchAcademicTerms(cookie: cookie, using: session)
+            let info = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: session)
+            return try await TimetableService().fetchAcademicTerms(
+                cookie: cookie, studentID: info.studentID, using: session
+            )
         }
     }
 

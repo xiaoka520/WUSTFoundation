@@ -13,6 +13,8 @@ final class LoginTestServer: @unchecked Sendable {
         var blankPageRedirect = false
         var delay: TimeInterval = 0
         var studentID = "test-account"
+        var academicTermIDs = ["2027-2028-1", "2026-2027-2", "2026-2027-1", "2025-2026-2", "2025-2026-1"]
+        var selectedTermID: String? = "2026-2027-1"
         var avatarJSON = #"{"code":"0","datas":{"headImageIcon":null}}"#
         var avatarLoginRequired = false
         var requests: [URLRequest] = []
@@ -42,6 +44,11 @@ final class LoginTestServer: @unchecked Sendable {
         case ("auth.wust.edu.cn", "/personalInfo/personCenter/index.html"):
             if scenario.avatarLoginRequired { finalURL = URL(string: "https://auth.wust.edu.cn/authserver/login")! }
             text = "<html>personal center</html>"
+        case ("bkjx.wust.edu.cn", "/jsxsd/xskb/xskb_list.do"):
+            let options = scenario.academicTermIDs.map { id in
+                "<option value='\(id)'\(id == scenario.selectedTermID ? " selected" : "")>\(id)</option>"
+            }.joined()
+            text = "<form id='Form1' method='post'><select id='xnxq01id' name='xnxq01id'>\(options)</select></form>"
         case ("auth.wust.edu.cn", "/personalInfo/UserData/user/queryUserData"):
             text = scenario.avatarJSON
         default: throw URLError(.unsupportedURL)

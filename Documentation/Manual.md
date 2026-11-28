@@ -307,6 +307,8 @@ let avatarData = studentWithAvatar.avatarData
 
 课表模块采用两阶段模型：**获取学期列表** -> **指定学期抓取课表与校准周历**。
 
+`client.fetchAcademicTerms()` 使用学生信息中真实学号的前四位作为入学年份，过滤起始年份早于入学年份的学期。例如学号以 `2026` 开头时，返回列表保留 `2026-2027-1`、`2026-2027-2` 及之后的学期，排除 `2025-2026-1` 等更早学期。手机号登录同样适用。被过滤的默认选中学期会变为 nil，列表也可能为空。学号或学期 ID 无法识别年份时保留对应原始数据。直接调用低层 `TimetableService.fetchAcademicTerms(cookie:studentID:using:)` 时，传入学号即可启用相同过滤。
+
 ```swift
 // 1. 获取所有可选学期
 let termOptions = try await client.fetchAcademicTerms()

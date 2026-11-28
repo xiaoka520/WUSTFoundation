@@ -6,6 +6,35 @@ import Testing
 struct WUSTLoginClientTests {
     init() { LoginTestServer.shared.reset() }
 
+    @Test func academicTermsUseRealStudentIDWhenLoginUsesPhone() async throws {
+        LoginTestServer.shared.update { $0.studentID = "202600000001" }
+        let client = try testClient(username: "13800000000")
+        _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
+        let terms = try await client.fetchAcademicTerms()
+        #expect(terms.terms.map(\.id) == ["2027-2028-1", "2026-2027-2", "2026-2027-1"])
+        #expect(terms.selectedTermID == "2026-2027-1")
+        LoginTestServer.shared.update { $0.selectedTermID = "2025-2026-1" }
+        #expect(try await client.fetchAcademicTerms().selectedTermID == nil)
+    }
+
+    @Test func academicTermsCanAllPrecedeAdmission() async throws {
+        LoginTestServer.shared.update { $0.studentID = "202800000001" }
+        let client = try testClient()
+        _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
+        let terms = try await client.fetchAcademicTerms()
+        #expect(terms.terms.isEmpty)
+        #expect(terms.selectedTermID == nil)
+    }
+
+    @Test func academicTermsPreserveUnknownIDsAndMissingAdmissionYear() async throws {
+        LoginTestServer.shared.update { $0.academicTermIDs = ["2025-2026-1", "custom-term"] }
+        let client = try testClient()
+        _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
+        #expect(try await client.fetchAcademicTerms().terms.map(\.id) == ["2025-2026-1", "custom-term"])
+        LoginTestServer.shared.update { $0.studentID = "202600000001" }
+        #expect(try await client.fetchAcademicTerms().terms.map(\.id) == ["custom-term"])
+    }
+
     @Test func avatarUsesRetainedAuthCookiesAndExplicitStudentInfoOption() async throws {
         let image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
         LoginTestServer.shared.update {

@@ -18,10 +18,23 @@ public struct TimetableService: Sendable {
 
     public func fetchAcademicTerms(
         cookie: String,
+        studentID: String? = nil,
         using session: URLSession
     ) async throws -> AcademicTermList {
         let entry = try await fetchEntry(cookie: cookie, using: session)
-        return entry.terms
+        guard let studentID, studentID.count >= 4,
+              let admissionYear = Int(studentID.prefix(4)), admissionYear >= 1000 else {
+            return entry.terms
+        }
+        let terms = entry.terms.terms.filter { term in
+            let firstYear = term.id.split(separator: "-").first ?? ""
+            guard firstYear.count == 4, let year = Int(firstYear) else { return true }
+            return year >= admissionYear
+        }
+        let selectedTermID = entry.terms.selectedTermID.flatMap { id in
+            terms.contains(where: { $0.id == id }) ? id : nil
+        }
+        return AcademicTermList(terms: terms, selectedTermID: selectedTermID)
     }
 
     public func fetchTimetable(

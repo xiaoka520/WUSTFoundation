@@ -12,13 +12,13 @@
 let terms = try await client.fetchAcademicTerms()
 ```
 
-此方法检查当前教务会话，然后读取课表入口提供的学期选项。会话不可用时需重新登录。登录状态无法满足业务访问时抛 `WUSTLoginClientError.notAuthenticated`；App 再调用 `ensureSession()`，根据 `WUSTLoginResult` 展示所需交互，不自动发送短信。
+此方法检查当前教务会话，读取学生信息中的实际学号，然后读取并筛选课表入口提供的学期选项。学号前四位作为入学年份，例如 `2026` 只保留 `2026-2027-1`、`2026-2027-2` 及之后的学期。用手机号登录时同样使用服务端返回的学号。学号无法提供有效年份时保留原列表，学期 ID 无法识别起始年份时保留该选项。会话不可用时需重新登录。登录状态无法满足业务访问时抛 `WUSTLoginClientError.notAuthenticated`；App 再调用 `ensureSession()`，根据 `WUSTLoginResult` 展示所需交互，不自动发送短信。
 
 一个账号保留一个 client。不要为每次刷新新建实例；切换账号前先退出旧 client。client 的 URLSession 不公开给 App。
 
 ## 2. 让用户选择服务器提供的学期
 
-`AcademicTermList.terms` 保存服务器提供的 ID 和名称，`selectedTermID` 仅表示页面显式标记的选中项。没有明确选中项时为 nil，App 应让用户选择，不自行以数组首项代替当前学期。
+`AcademicTermList.terms` 保存筛选后的学期 ID 和名称，保留服务器顺序。`selectedTermID` 表示页面显式标记且仍在列表中的选中项，没有明确选中项或该项被入学年份规则过滤时为 nil。所有选项都早于入学年份时，列表可以为空，App 应展示暂无可选学期。
 
 ```swift
 let selectedTerm = terms.terms.first { $0.id == terms.selectedTermID }
@@ -26,7 +26,7 @@ let selectedTerm = terms.terms.first { $0.id == terms.selectedTermID }
 
 App 将 `terms.terms` 作为选项展示，保存用户选择的 `AcademicTerm`。ID 作为服务器标识使用，不根据当前日期构造。服务器可能列出很多往年学期，选项数量不代表当前账号在所有这些学期都有课程。
 
-`fetchAcademicTerms()` 和低层 `fetchAcademicTerms(cookie:using:)` 都返回 `AcademicTermList`，内容例如：
+`fetchAcademicTerms()` 和低层 `fetchAcademicTerms(cookie:studentID:using:)` 都返回 `AcademicTermList`。低层服务传入学号才启用入学年份过滤，省略时返回原始选项。内容例如：
 
 ```swift
 let exampleTerms = AcademicTermList(
@@ -215,7 +215,7 @@ Timetable(
 
 ```swift
 let service = TimetableService()
-let terms = try await service.fetchAcademicTerms(cookie: cookie, using: session)
+let terms = try await service.fetchAcademicTerms(cookie: cookie, studentID: studentID, using: session)
 let timetable = try await service.fetchTimetable(
     term: chosenTerm,
     cookie: cookie,
