@@ -5,6 +5,7 @@ public actor WUSTLoginClient {
     private let configuration: URLSessionConfiguration
     private var session: URLSession
     private var pendingSMSLogin: (context: AuthServerSMSLoginContext, session: URLSession)?
+    private var pendingManualLogin: ManualSliderCaptchaSession?
     private var version = 0
     private var sessionInvalidated = false
     private var loggingOut = false
@@ -24,10 +25,47 @@ public actor WUSTLoginClient {
     deinit {
         session.invalidateAndCancel()
         pendingSMSLogin?.session.invalidateAndCancel()
+        pendingManualLogin?.cancel()
     }
 
     public func ensureSession() async throws -> WUSTLoginResult {
         try await run(kind: .check) { try await self.checkSession() }
+    }
+
+    /// Creates a user-operated CAPTCHA session. The login form stays native; its view loads only the official CAPTCHA.
+    public func prepareManualAuthServerLogin() throws -> ManualSliderCaptchaSession {
+        guard !loggingOut, operation == nil else { throw WUSTLoginClientError.operationInProgress }
+        try Task.checkCancellation()
+        clearPendingSMSLogin()
+        clearPendingManualLogin()
+        let value = ManualSliderCaptchaSession(using: Self.makeSession(configuration: configuration))
+        pendingManualLogin = value
+        return value
+    }
+
+    public func cancelManualAuthServerLogin() { clearPendingManualLogin() }
+
+    /// Continues the same session after ManualSliderCaptchaView reports server-confirmed success.
+    public func loginWithManualAuthServer(password: String, verification: ManualSliderCaptchaSession) async throws -> WUSTLoginResult {
+        try await withTaskCancellationHandler {
+            try await run(kind: .login, cancelOnCallerCancellation: true) {
+                try await self.performManualAuthServerLogin(password: password, verification: verification)
+            }
+        } onCancel: { verification.cancel() }
+    }
+
+    private func performManualAuthServerLogin(password: String, verification: ManualSliderCaptchaSession) async throws -> WUSTLoginResult {
+        guard !password.isEmpty else { throw AuthServerLoginError.invalidInput }
+        guard pendingManualLogin?.id == verification.id else { throw WUSTLoginClientError.verificationNotPending }
+        let expectedVersion = version
+        // Keep the reference until completion so logout/switching modes can invalidate it immediately.
+        defer {
+            if pendingManualLogin?.id == verification.id { pendingManualLogin = nil }
+            verification.cancel()
+        }
+        let cookies = try await verification.complete(username: username, password: password)
+        try checkActive(expectedVersion)
+        return try await validateUndergraduateWebSession(cookies)
     }
 
     public func loginWithAuthServer(password: String, maxSliderAttempts: Int = 3,
@@ -39,6 +77,7 @@ public actor WUSTLoginClient {
 
     private func performAuthServerLogin(password: String, maxSliderAttempts: Int,
                                         diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)?) async throws -> WUSTLoginResult {
+        clearPendingManualLogin()
         clearPendingSMSLogin()
         let expectedVersion = version
         let candidate = Self.makeSession(configuration: configuration)
@@ -70,6 +109,7 @@ public actor WUSTLoginClient {
         account: String, maxSliderAttempts: Int,
         diagnostics: (@Sendable (SliderCaptchaDiagnostic) -> Void)?
     ) async throws -> WUSTLoginResult {
+        clearPendingManualLogin()
         clearPendingSMSLogin()
         let expectedVersion = version
         let candidate = Self.makeSession(configuration: configuration)
@@ -95,6 +135,11 @@ public actor WUSTLoginClient {
         }
         let cookies = pendingSMSLogin.session.configuration.httpCookieStorage?.cookies ?? []
         return try await validateUndergraduateWebSession(cookies)
+    }
+
+    private func clearPendingManualLogin() {
+        pendingManualLogin?.cancel()
+        pendingManualLogin = nil
     }
 
     private func clearPendingSMSLogin() {
@@ -129,6 +174,7 @@ public actor WUSTLoginClient {
         guard info.studentID == username else { throw WUSTLoginClientError.studentIDMismatch }
 
         version += 1
+        clearPendingManualLogin()
         clearPendingSMSLogin()
         session.invalidateAndCancel()
         session = candidate
@@ -192,6 +238,7 @@ public actor WUSTLoginClient {
         loggingOut = true
         defer { loggingOut = false }
         version += 1
+        clearPendingManualLogin()
         clearPendingSMSLogin()
         let task = operation?.task
         operation = nil
@@ -204,6 +251,7 @@ public actor WUSTLoginClient {
 
     private func run(
         kind: OperationKind,
+        cancelOnCallerCancellation: Bool = false,
         body: @escaping @Sendable () async throws -> WUSTLoginResult
     ) async throws -> WUSTLoginResult {
         guard !loggingOut else { throw WUSTLoginClientError.operationInProgress }
@@ -217,7 +265,11 @@ public actor WUSTLoginClient {
         let task = Task { try await body() }
         operation = (id, kind, task)
         defer { if operation?.id == id { operation = nil } }
-        return try await task.value
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            if cancelOnCallerCancellation { task.cancel() }
+        }
     }
 
     private func checkSession() async throws -> WUSTLoginResult {

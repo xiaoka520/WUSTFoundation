@@ -1,12 +1,30 @@
 import Foundation
 import Darwin
 import WUSTFoundation
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct WUSTDemo {
     enum DemoError: Error { case missingInput }
 
-    static func main() async {
+    #if os(macOS)
+    @MainActor static func main() {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.accessory)
+        Task {
+            await runAndReport()
+            application.terminate(nil)
+        }
+        // A command-line async main alone does not own AppKit's mouse/touch event loop.
+        application.run()
+    }
+    #else
+    static func main() async { await runAndReport() }
+    #endif
+
+    private static func runAndReport() async {
         do { try await run() }
         catch let error as URLError {
             log("网络请求失败（URLError \(error.code.rawValue)），未将其判定为凭据失效。")
@@ -18,6 +36,9 @@ struct WUSTDemo {
             case .keychain(let status): log("本地账密文件的密钥读取失败（OSStatus \(status)）。")
             default: log("本地账密文件不可用，请用 --update-login-file 重新保存。")
             }
+            exit(EXIT_FAILURE)
+        } catch let error as AuthServerCredentialError {
+            log(error.localizedDescription)
             exit(EXIT_FAILURE)
         } catch let error as AuthServerLoginError {
             if case .smsCodeRejected(let code) = error {
@@ -70,6 +91,12 @@ struct WUSTDemo {
     }
 
     private static func run() async throws {
+        #if os(macOS)
+        if CommandLine.arguments.contains("--manual-slider-preview") {
+            try await ManualSliderLoginDemo.preview()
+            return
+        }
+        #endif
         if CommandLine.arguments.contains("--login-file-path") {
             log(DemoLoginFile.fileURL.path)
             return
@@ -104,13 +131,29 @@ struct WUSTDemo {
         }
         let client = try makeClient(username: username)
         let choice: String?
-        if CommandLine.arguments.contains("--sms-login") {
+        if CommandLine.arguments.contains("--manual-slider-login") {
+            choice = "6"
+        } else if CommandLine.arguments.contains("--sms-login") {
             choice = "5"
         } else if CommandLine.arguments.contains("--native-login") {
             choice = "4"
         } else {
-            log("输入 1 检查当前会话（默认），2 在学校网页登录，3 清除当前会话，4 使用新版接口自动登录，5 短信登录：")
+            log("输入 1 检查当前会话（默认），2 在学校网页登录，3 清除当前会话，4 使用新版接口自动登录，5 短信登录，6 独立手动滑块登录：")
             choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if choice == "6" {
+            #if os(macOS)
+            let password: String
+            if let saved = savedLogin?.password, !CommandLine.arguments.contains("--prompt-password") { password = saved }
+            else { password = try await DemoPasswordInput.read(savingLocally: false) }
+            let result = try await ManualSliderLoginDemo.run(using: client, password: password)
+            guard describe(result) else { return }
+            log("手动滑块登录及教务会话检查完成。")
+            try await runSessionMenu(client: client, username: username)
+            return
+            #else
+            throw WUSTLoginClientError.notAuthenticated
+            #endif
         }
         if choice == "5" {
             log("请输入接收短信的绑定手机号或学号，回车使用当前学号。提交后会校验滑块并申请一次短信：")

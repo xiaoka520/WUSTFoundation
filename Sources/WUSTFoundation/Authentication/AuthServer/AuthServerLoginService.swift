@@ -44,14 +44,70 @@ public struct AuthServerLoginService: Sendable {
         let submission = try Self.submission(html: html, loginURL: loginURL,
                                              username: username, password: password)
         _ = try await AuthServerCaptchaService(referer: loginURL).solveAndVerify(using: session, maxAttempts: maxSliderAttempts, diagnostics: diagnostics)
-        let (_, completedResponse) = try await session.data(
+        let (completedData, completedResponse) = try await session.data(
             for: submission, delegate: AuthServerRedirectPolicy(authenticationHost: "auth.wust.edu.cn")
         )
-        let completed = try Self.http(completedResponse)
-        guard completed.url?.host == service.host else { throw AuthServerLoginError.loginNotCompleted }
+        try AuthServerPasswordResponse.validate(data: completedData, response: completedResponse, loginURL: loginURL, service: service)
+    }
+
+    func prepareManualLogin(service: URL = URL(string: "https://bkjx.wust.edu.cn/jsxsd/")!,
+                            using session: URLSession) async throws -> ManualAuthServerLoginPreparation {
+        guard service.scheme == "https", service.host != nil else { throw AuthServerLoginError.invalidInput }
+        var components = URLComponents(string: "https://auth.wust.edu.cn/authserver/login")!
+        components.queryItems = [URLQueryItem(name: "service", value: service.absoluteString)]
+        guard let loginURL = components.url else { throw AuthServerLoginError.invalidInput }
+        var initialRequest = URLRequest(url: loginURL)
+        AuthServerRequestHeaders.apply(to: &initialRequest, ajax: false)
+        let (data, response) = try await session.data(for: initialRequest)
+        let initial = try Self.http(response)
+        if initial.url?.host == service.host {
+            return ManualAuthServerLoginPreparation(loginURL: loginURL, service: service,
+                                               html: nil)
+        }
+        guard initial.url?.host == loginURL.host,
+              data.count < 12_000_000, let html = String(data: data, encoding: .utf8) else {
+            throw AuthServerLoginError.invalidResponse
+        }
+        _ = try Self.passwordForm(html: html, loginURL: loginURL)
+        return ManualAuthServerLoginPreparation(loginURL: loginURL, service: service, html: html)
+    }
+
+    /// Called only by a manual session after its real user gesture was accepted by the server.
+    func submitManuallyVerifiedLogin(username: String, password: String,
+                                     preparation: ManualAuthServerLoginPreparation,
+                                     using session: URLSession) async throws {
+        guard !username.isEmpty, !password.isEmpty else { throw AuthServerLoginError.invalidInput }
+        try Task.checkCancellation()
+        guard let html = preparation.html else { return }
+        let request = try Self.submission(html: html, loginURL: preparation.loginURL, username: username, password: password)
+        let (data, response) = try await session.data(for: request,
+            delegate: AuthServerRedirectPolicy(authenticationHost: "auth.wust.edu.cn"))
+        try AuthServerPasswordResponse.validate(data: data, response: response, loginURL: preparation.loginURL, service: preparation.service)
     }
 
     static func submission(html: String, loginURL: URL, username: String, password: String) throws -> URLRequest {
+        let form = try passwordForm(html: html, loginURL: loginURL)
+        var fields = form.fields
+        fields["username"] = username
+        fields["password"] = try AuthServerEncryption.encrypt(Data(password.utf8), key: form.salt)
+        fields["captcha"] = ""
+        // passwordText is disabled by the official form before submission; never send plaintext.
+        fields.removeValue(forKey: "passwordText")
+        var query = URLComponents()
+        query.queryItems = fields.keys.sorted().map { URLQueryItem(name: $0, value: fields[$0]) }
+        guard let encoded = query.percentEncodedQuery else { throw AuthServerLoginError.invalidForm }
+        var request = URLRequest(url: loginURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        AuthServerRequestHeaders.apply(to: &request, ajax: false, referer: loginURL)
+        request.setValue("application/x-www-form-urlencoded;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(loginURL.absoluteString, forHTTPHeaderField: "Referer")
+        request.setValue("https://auth.wust.edu.cn", forHTTPHeaderField: "Origin")
+        request.httpBody = Data(encoded.replacingOccurrences(of: "+", with: "%2B").utf8)
+        return request
+    }
+
+    static func passwordForm(html: String, loginURL: URL) throws -> (salt: String, fields: [String: String]) {
         let document = try SwiftSoup.parse(html)
         guard let form = try document.getElementById("pwdFromId"),
               try form.attr("method").lowercased() == "post",
@@ -72,23 +128,7 @@ public struct AuthServerLoginService: Sendable {
         }
         guard let execution = fields["execution"], !execution.isEmpty,
               fields["_eventId"] == "submit" else { throw AuthServerLoginError.invalidForm }
-        fields["username"] = username
-        fields["password"] = try AuthServerEncryption.encrypt(Data(password.utf8), key: salt)
-        fields["captcha"] = ""
-        // passwordText is disabled by the official form before submission; never send plaintext.
-        fields.removeValue(forKey: "passwordText")
-        var query = URLComponents()
-        query.queryItems = fields.keys.sorted().map { URLQueryItem(name: $0, value: fields[$0]) }
-        guard let encoded = query.percentEncodedQuery else { throw AuthServerLoginError.invalidForm }
-        var request = URLRequest(url: loginURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        AuthServerRequestHeaders.apply(to: &request, ajax: false, referer: loginURL)
-        request.setValue("application/x-www-form-urlencoded;charset=UTF-8", forHTTPHeaderField: "Content-Type")
-        request.setValue(loginURL.absoluteString, forHTTPHeaderField: "Referer")
-        request.setValue("https://auth.wust.edu.cn", forHTTPHeaderField: "Origin")
-        request.httpBody = Data(encoded.replacingOccurrences(of: "+", with: "%2B").utf8)
-        return request
+        return (salt, fields)
     }
 
     static func http(_ response: URLResponse) throws -> HTTPURLResponse {

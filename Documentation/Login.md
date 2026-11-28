@@ -1,6 +1,6 @@
 # 登录与会话接入
 
-更新：2026-11-26。学校登录入口统一使用 `/authserver/login`。旧 `/lyuapServer` 登录、RSA 密码编码、TGT 存取与换票、旧短信二次验证及 aTrust 自动认证链路已移除。算术验证码的 `VisionCaptchaSolver` 保留为独立图片识别工具，不参与新版登录。
+更新：2026-11-28。学校登录入口统一使用 `/authserver/login`。旧 `/lyuapServer` 登录、RSA 密码编码、TGT 存取与换票、旧短信二次验证及 aTrust 自动认证链路已移除。算术验证码的 `VisionCaptchaSolver` 保留为独立图片识别工具，不参与新版登录。
 
 ## 创建 client
 
@@ -26,6 +26,87 @@ let result = try await client.loginWithAuthServer(
 滑块通过不代表登录完成。包还会检查教务会话、读取学生信息并匹配初始化时的学号，通过后才替换当前 client 会话。失败不会覆盖之前的有效教务会话。
 
 密码由调用方提供，库不保存密码，不自动重试账号密码登录。App 自行决定密码输入与安全存储策略。
+
+## 独立手动滑块组件
+
+`ManualSliderCaptchaView` 是 SwiftUI 包装的 WKWebView 组件，显示学校网页原生滑块验证区域和取消、重新加载按钮。可用于 iOS 15+、macOS 15+、visionOS 1+ 的下游 App；由 App 自行选择 sheet、popover 或窗口，建议宽 340～400 点，最小宽 300 点。
+
+通过同一个 `WUSTLoginClient` 创建 `ManualSliderCaptchaSession`。组件使用包内生成的独立 HTML 宿主，直接从学校的 `toSliderCaptcha.htl` 加载原始滑块片段及其样式、JavaScript，仅补充 jQuery 和官方加密脚本依赖。WKWebView 不加载完整登录页或 `login.js`，也没有账号输入框、密码输入框和登录表单。拖动、图片加载、失败刷新及校验请求均由官方组件处理；已移除自绘的 SwiftUI 拖动条和原生手势采样。密码不会传入 WKWebView，网页也不允许自动提交登录表单。
+
+WKWebView 使用独立的临时网站数据存储，从本次登录会话同步 Cookie。私有桥接仅接受指定 HTTPS 验证组件主文档、当前页面标识的消息，并确认实际校验响应业务码为 `1` 后才接回状态。回传时同步验证后的 Cookie；原生 URLSession 预先获取的登录表单和 execution 始终保留在库内，组件不会再次请求登录页来替换它们。只有完成状态同步后才调用 `onVerified`。这仍需要联网访问学校验证码服务，不是离线验证组件。
+
+以下示例由 App 持有账号 client 和密码输入，不把密码传入验证码界面：
+
+```swift
+import SwiftUI
+import WUSTFoundation
+
+@MainActor
+struct ManualLoginButton: View {
+    let client: WUSTLoginClient
+    @Binding var password: String
+    @State private var verification: ManualSliderCaptchaSession?
+    @State private var working = false
+    @State private var continuing = false
+    @State private var message = ""
+
+    var body: some View {
+        VStack {
+            Button("手动滑块登录") {
+                guard !working else { return }
+                working = true
+                Task {
+                    do { verification = try await client.prepareManualAuthServerLogin() }
+                    catch { message = "无法开始验证"; working = false }
+                }
+            }.disabled(working || password.isEmpty)
+            Text(message)
+        }
+        .sheet(item: $verification, onDismiss: {
+            // 组件会在成功前离开界面时取消其会话；这里恢复 App 的按钮状态。
+            if !continuing {
+                working = false
+            }
+        }) { session in
+            ManualSliderCaptchaView(session: session, onVerified: {
+                continuing = true
+                verification = nil
+                Task {
+                    defer { continuing = false; working = false }
+                    do {
+                        let result = try await client.loginWithManualAuthServer(
+                            password: password, verification: session
+                        )
+                        if case .authenticated = result { message = "登录完成" }
+                    } catch let error as AuthServerCredentialError {
+                        message = error.localizedDescription
+                    } catch { message = "登录未完成，请重试或使用官方网页登录" }
+                }
+            }, onCancel: { verification = nil })
+        }
+    }
+}
+```
+
+`onVerified` 只表示滑块校验成功，尚未提交密码。必须使用同一个 client、同一个 session 调用 `loginWithManualAuthServer`；不要在回调里调用自动登录入口。续接接口消费会话一次，使用原表单和原 Cookie 容器提交密码，然后沿用现有的教务 Cookie 与学生信息页面检查，成功才替换 client 会话。密码提交失败后需重新开始，不重复提交旧挑战或旧登录表单。
+
+取消按钮或组件在成功前离开界面会立即关闭临时会话。下游也可主动调用 `session.cancel()` 或 `await client.cancelManualAuthServerLogin()`。退出 client、替换手动会话、开始自动密码或短信登录会作废旧手动会话；其他 client 创建的 session 不能用来续接。对共享的同一个 client，不要同时启动不同登录方式。
+
+官方滑块内的刷新、失败处理由学校脚本负责；外层“重新加载”重新建立网页验证上下文，旧页面不能再接回结果。库采用本地 120 秒的页面交互上限，以及验证成功后的 120 秒续接上限，这些是客户端限制，不是学校公布的有效期；服务端可能更早拒绝。验证阶段失败、过期或取消不会提交密码。加载失败会提示重新加载或使用官方完整登录页。
+
+该入口当前只接入密码登录，短信仍使用现有短信/官方网页入口。手势及可访问性支持由学校网页组件决定，下游应保留官方完整登录页。组件不把密码、图片、Cookie 或手动轨迹写入日志文件，不向外暴露校验协议的密钥，也不改写学校脚本生成的轨迹。
+
+macOS Demo 支持登录菜单 `6` 或 `swift run WUSTDemo --manual-slider-login`。它读取密码后只弹出官方滑块区域，验证成功再续接登录；`--prompt-password` 可强制重新输入。`swift run WUSTDemo --manual-slider-preview` 只打开匿名官方滑块预览，不读取本地账号密码文件，也不提交密码。
+
+macOS Demo 的入口运行 AppKit 事件循环，异步登录任务在循环内执行，使窗口和 WKWebView 能正常接收鼠标、触摸与关闭事件；下游 SwiftUI/AppKit App 使用自身已有的事件循环即可。
+
+测试覆盖合成协议响应、网页脚本桥接与会话轮换；另已通过匿名 GET 核对当前官网组件入口，但尚未据此宣称真人拖动通过或真实账号登录验收通过。
+
+### 单独处理账号或密码错误
+
+服务器明确返回账号或密码拒绝文本时，密码登录接口抛出独立的 `AuthServerCredentialError.invalidCredentials`，不再使用通用的 `AuthServerLoginError.loginNotCompleted`。App 可单独捕获它并提示“账号或密码错误，请检查后重试”。学校若没有区分账号与密码，库也不推断一定是密码错。
+
+只有可信登录响应中指定错误区域的明确凭据拒绝文本才会触发该类型。验证码错误、账号锁定、密码过期、额外认证、未知页面和网络错误不会被归类为密码错误；未知的登录失败仍保留 `loginNotCompleted`。库不自动重新提交密码，Demo 也单独打印凭据错误提示。错误消息不附带账号、密码或原始响应内容。
 
 ## 新版手机号短信登录
 
@@ -100,6 +181,7 @@ try await client.logout()
 
 | 错误 | App 处理 |
 |---|---|
+| `AuthServerCredentialError.invalidCredentials` | 独立提示账号或密码错误，由用户修改，不自动重复提交 |
 | `AuthServerLoginError.invalidInput` | 检查账号、短信码或传入参数 |
 | `.invalidForm`、`.invalidResponse` | 官网结构或响应变化，保留错误类别供排查 |
 | `.loginNotCompleted` | 认证页面仍要求交互，不展示登录成功 |
@@ -113,7 +195,7 @@ try await client.logout()
 
 ## Demo 与验证范围
 
-运行 `swift run WUSTDemo`：菜单 1 检查当前会话，2 官方网页登录，3 清除当前会话，4 新版自动密码登录，5 新版短信登录。`--native-login`、`--sms-login` 可直接选择对应流程。菜单中的全新 client 测试现在明确要求重新登录。
+运行 `swift run WUSTDemo`：菜单 1 检查当前会话，2 官方网页登录，3 清除当前会话，4 新版自动密码登录，5 新版短信登录，6 独立手动滑块登录。`--native-login`、`--sms-login`、`--manual-slider-login` 可直接选择对应流程；`--manual-slider-preview` 无账号预览滑块组件。菜单中的全新 client 测试现在明确要求重新登录。
 
 密码 Demo 的本地加密账密文件与 Keychain 密钥仍保留，用于反复测试新版入口；库本身不保存密码。旧 TGT 的 Keychain 适配代码已删除，既有系统钥匙串条目不由这次代码清理自动删除，也不会再读取。
 
