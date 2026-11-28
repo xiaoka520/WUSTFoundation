@@ -1,3 +1,5 @@
+import Foundation
+
 public struct StudentInfo: Sendable {
     public let name: String //姓名
     public let studentID: String //学号
@@ -9,6 +11,7 @@ public struct StudentInfo: Sendable {
     public let nationality: String //民族
     public let hometown: String //籍贯
     public let idNumber: String //身份证号
+    public internal(set) var avatarData: Data?
     
     public init(
         name: String,
@@ -20,7 +23,8 @@ public struct StudentInfo: Sendable {
         sex: String,
         nationality: String,
         hometown: String,
-        idNumber: String
+        idNumber: String,
+        avatarData: Data? = nil
     ) {
         self.name = name
         self.studentID = studentID
@@ -32,6 +36,7 @@ public struct StudentInfo: Sendable {
         self.nationality = nationality
         self.hometown = hometown
         self.idNumber = idNumber
+        self.avatarData = avatarData
     }
     
 }

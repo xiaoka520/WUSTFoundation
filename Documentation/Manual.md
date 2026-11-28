@@ -289,6 +289,18 @@ print("班级：\(student.className)")
 print("身份证号：\(student.idNumber)")
 ```
 
+头像来自统一认证个人中心，通过以下接口按需读取：
+
+```swift
+let imageData: Data? = try await client.fetchStudentAvatar()
+let studentWithAvatar = try await client.fetchStudentInfo(includeAvatar: true)
+let avatarData = studentWithAvatar.avatarData
+```
+
+返回的是原始图片字节，可传给 UIImage 或 NSImage。学校未设置头像时返回 nil。原有无参数的 `fetchStudentInfo()` 只读学籍信息，其 `avatarData` 为 nil；传入 `includeAvatar: true` 时，头像请求失败会抛错。需要分别处理资料和头像的加载状态时，分别调用两个接口。
+
+登录成功后 client 在内存中保留统一认证与教务 Cookie，个人中心接口自行建立所需页面会话。个人中心要求重新认证时抛 `StudentAvatarError.authenticationRequired`，可重新完成登录。App 管理图片缓存和显示。低层 `StudentAvatarService().fetchAvatar(using: session)` 可使用调用方已有的统一认证会话。Demo 登录后选菜单 15，可检查图片字节数。
+
 ---
 
 ### 5.2 学期、课表与教学周历

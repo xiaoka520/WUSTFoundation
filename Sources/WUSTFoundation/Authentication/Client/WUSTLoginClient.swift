@@ -167,6 +167,13 @@ public actor WUSTLoginClient {
         }
         storage.setCookies(undergraduateCookies, for: url, mainDocumentURL: url)
 
+        for cookie in cookies {
+            let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+            if ["auth.wust.edu.cn", "wust.edu.cn"].contains(domain.lowercased()) {
+                storage.setCookie(cookie)
+            }
+        }
+
         let cookie = try await UndergraduateAuthService().currentSessionCookie(using: candidate)
         try checkActive(expectedVersion)
         _ = try await StudentInfoService().fetchStudentInfo(cookie: cookie, using: candidate)
@@ -190,6 +197,20 @@ public actor WUSTLoginClient {
         }
         try checkActive(expectedVersion)
         return info
+    }
+
+    public func fetchStudentInfo(includeAvatar: Bool) async throws -> StudentInfo {
+        let expectedVersion = version
+        var info = try await fetchStudentInfo()
+        if includeAvatar { info.avatarData = try await fetchStudentAvatar() }
+        try checkActive(expectedVersion)
+        return info
+    }
+
+    public func fetchStudentAvatar() async throws -> Data? {
+        try await withAuthenticatedSession { session in
+            try await StudentAvatarService().fetchAvatar(using: session)
+        }
     }
 
     public func withUndergraduateSession<Value: Sendable>(

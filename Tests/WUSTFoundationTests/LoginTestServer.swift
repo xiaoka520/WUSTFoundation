@@ -13,6 +13,8 @@ final class LoginTestServer: @unchecked Sendable {
         var blankPageRedirect = false
         var delay: TimeInterval = 0
         var studentID = "test-account"
+        var avatarJSON = #"{"code":"0","datas":{"headImageIcon":null}}"#
+        var avatarLoginRequired = false
         var requests: [URLRequest] = []
     }
 
@@ -37,9 +39,15 @@ final class LoginTestServer: @unchecked Sendable {
             var rows = Array(repeating: Array(repeating: "synthetic", count: 5), count: 50)
             rows[2] = ["院系：示例院系", "专业：示例专业", "", "班级：示例班级", "学号：" + scenario.studentID]
             text = "<table id='xjkpTable'><tbody>" + rows.map { "<tr>" + $0.map { "<td>" + $0 + "</td>" }.joined() + "</tr>" }.joined() + "</tbody></table>"
+        case ("auth.wust.edu.cn", "/personalInfo/personCenter/index.html"):
+            if scenario.avatarLoginRequired { finalURL = URL(string: "https://auth.wust.edu.cn/authserver/login")! }
+            text = "<html>personal center</html>"
+        case ("auth.wust.edu.cn", "/personalInfo/UserData/user/queryUserData"):
+            text = scenario.avatarJSON
         default: throw URLError(.unsupportedURL)
         }
-        return (HTTPURLResponse(url: finalURL, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(text.utf8), scenario.delay)
+        let headers = url.path.hasSuffix("/queryUserData") ? ["Content-Type": "application/json"] : nil
+        return (HTTPURLResponse(url: finalURL, statusCode: 200, httpVersion: nil, headerFields: headers)!, Data(text.utf8), scenario.delay)
     }
 }
 

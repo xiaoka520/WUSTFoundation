@@ -125,6 +125,8 @@ let result = try await client.loginWithSMSCode(smsCode)
 
 ## 官方网页登录
 
+登录成功后的 client 保留统一认证与教务 Cookie，均存放在隔离的内存 Cookie 容器中，退出时一同清除。个人中心头像可调用 `fetchStudentAvatar()`，或调用 `fetchStudentInfo(includeAvatar: true)` 通过 `StudentInfo.avatarData` 获取。个人中心会话失效会抛 `StudentAvatarError.authenticationRequired`，不自动发短信或提交密码。
+
 App 可以保留官方 WebKit 登录入口，让用户在学校页面完成账号、短信或其他验证：
 
 ```swift

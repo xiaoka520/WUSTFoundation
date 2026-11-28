@@ -245,7 +245,7 @@ struct WUSTDemo {
     private static func runSessionMenu(client: WUSTLoginClient, username: String) async throws {
         var activeClient = client
         while true {
-            log("输入 1 使用全新 client 重新登录，2 复用当前会话，3 清除当前会话，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，14 查询第二课堂成绩单，其他输入结束：")
+            log("输入 1 使用全新 client 重新登录，2 复用当前会话，3 清除当前会话，4 采集原始课表，5 查询并解析课表，6 查询教学周日期，7 查看学校通知，8 查看培养方案，9 查询课程成绩，10 查询考试安排，11 查看学分完成情况，12 查询图书馆只读信息，13 查询校车时刻表，14 查询第二课堂成绩单，15 获取个人中心头像，其他输入结束：")
             switch readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) {
             case "1":
                 let restored = try makeClient(username: username)
@@ -368,6 +368,16 @@ struct WUSTDemo {
                 } catch WUSTLoginClientError.notAuthenticated {
                     log("第二课堂查询需要有效的学工会话，新版跨系统自动登录尚未接入。")
                     return
+                }
+            case "15":
+                do {
+                    if let data = try await activeClient.fetchStudentAvatar() {
+                        log("个人中心头像获取成功，图片数据共 \(data.count) 字节。")
+                    } else {
+                        log("个人中心尚未设置头像。")
+                    }
+                } catch StudentAvatarError.authenticationRequired {
+                    log("个人中心会话需要重新登录，请通过登录菜单完成认证后重试。")
                 }
             default:
                 return

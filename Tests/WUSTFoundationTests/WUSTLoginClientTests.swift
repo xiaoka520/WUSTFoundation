@@ -6,6 +6,49 @@ import Testing
 struct WUSTLoginClientTests {
     init() { LoginTestServer.shared.reset() }
 
+    @Test func avatarUsesRetainedAuthCookiesAndExplicitStudentInfoOption() async throws {
+        let image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+        LoginTestServer.shared.update {
+            $0.avatarJSON = #"{"code":"0","datas":{"headImageIcon":""# + image + #""}}"#
+        }
+        let token = try #require(HTTPCookie(properties: [
+            .domain: "auth.wust.edu.cn", .path: "/", .name: "REFERERCE_TOKEN",
+            .value: "synthetic-token", .secure: "TRUE"
+        ]))
+        let client = try testClient()
+        _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie(), token])
+        #expect(try await client.fetchStudentInfo().avatarData == nil)
+        #expect(LoginTestServer.shared.count("/personalInfo/personCenter/index.html") == 0)
+        let info = try await client.fetchStudentInfo(includeAvatar: true)
+        #expect(info.avatarData == Data(base64Encoded: image))
+        let request = try #require(LoginTestServer.shared.requests().last { $0.url?.path.hasSuffix("/queryUserData") == true })
+        #expect(request.value(forHTTPHeaderField: "refererToken") == "synthetic-token")
+        #expect(request.url?.host == "auth.wust.edu.cn")
+        try await client.logout()
+        await #expect(throws: WUSTLoginClientError.notAuthenticated) { try await client.fetchStudentAvatar() }
+    }
+
+    @Test func avatarAbsenceAndExpiredAuthSessionAreDistinct() async throws {
+        let client = try testClient()
+        _ = try await client.adoptUndergraduateWebSession([testUndergraduateCookie()])
+        #expect(try await client.fetchStudentAvatar() == nil)
+        LoginTestServer.shared.update { $0.avatarLoginRequired = true }
+        await #expect(throws: StudentAvatarError.authenticationRequired) { try await client.fetchStudentAvatar() }
+        #expect(isAuthenticated(try await client.ensureSession()))
+    }
+
+    @Test func avatarRejectsMalformedImageAndBusinessFailure() throws {
+        #expect(throws: StudentAvatarError.invalidImage) {
+            try StudentAvatarService.avatar(from: Data(#"{"code":"0","datas":{"headImageIcon":"aGVsbG8="}}"#.utf8))
+        }
+        #expect(throws: StudentAvatarError.authenticationRequired) {
+            try StudentAvatarService.avatar(from: Data(#"{"code":"2106040302"}"#.utf8))
+        }
+        #expect(throws: StudentAvatarError.rejected("failure")) {
+            try StudentAvatarService.avatar(from: Data(#"{"code":"failure"}"#.utf8))
+        }
+    }
+
     @Test func missingSessionRequiresLoginWithoutNetwork() async throws {
         let client = try testClient()
         guard case .loginRequired = try await client.ensureSession() else { Issue.record("Expected loginRequired"); return }
